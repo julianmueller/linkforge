@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  check-and-build:
+    name: Check & Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: |
+          uv venv
+          uv pip install -e ".[dev,docs]"
+
+      - name: Check formatting
+        run: uv run ruff format --check linkforge tests
+
+      - name: Lint code
+        run: uv run ruff check linkforge tests
+
+      - name: Build documentation
+        run: |
+          cd docs
+          uv run sphinx-build -b html -W source build/html
+
+      - name: Run tests
+        run: uv run pytest -q
+
+      - name: Build package
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          uv run python build_extension.py
+          ls -lh dist/
+
+      - name: Upload artifact
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: blender-extension
+          path: dist/linkforge-*.zip
+          retention-days: 7

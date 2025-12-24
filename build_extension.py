@@ -1,0 +1,255 @@
+#!/usr/bin/env python3
+"""Build script for packaging LinkForge as a Blender Extension.
+
+This script manages dependencies, updates the manifest, and creates a .zip package.
+1. sync: Automatically downloads wheels for target platforms/versions.
+2. build: Packages the extension into a .zip file.
+
+Usage:
+    python build_extension.py sync   # Update dependencies and manifest
+    python build_extension.py build  # Create the extension package
+    python build_extension.py clean  # Remove build artifacts
+"""
+
+from __future__ import annotations
+
+import fnmatch
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
+
+# Use tomllib (Py3.11+) or fall back to string parsing for manifest metadata
+try:
+    import tomllib
+except ImportError:
+    tomllib = None
+
+# --- Dependency Configuration ---
+# Packages to bundle as wheels for cross-platform/cross-version compatibility
+DEP_CONFIG = {
+    "PyYAML": {
+        "version": "6.0.1",
+        "platforms": ["win_amd64", "manylinux2014_x86_64", "macosx_11_0_arm64"],
+        "py_versions": ["310", "311"],
+    },
+    "xacrodoc": {"version": "1.3.0", "universal": True},
+    "rospkg": {"version": "1.6.0", "universal": True},
+    "docutils": {"version": "0.22.2", "universal": True},
+}
+
+
+def read_manifest_value(key: str) -> str:
+    """Read a value from blender_manifest.toml."""
+    manifest_path = Path(__file__).parent / "blender_manifest.toml"
+    content = manifest_path.read_text()
+    match = re.search(f'^{key}\\s*=\\s*"([^"]+)"', content, re.MULTILINE)
+    if match:
+        return match.group(1)
+    return "0.0.0"
+
+
+def sync_dependencies():
+    """Download required wheels and update the manifest."""
+    root_dir = Path(__file__).parent
+    wheels_dir = root_dir / "wheels"
+    wheels_dir.mkdir(exist_ok=True)
+
+    print("🔄 Syncing dependencies...")
+
+    for pkg, config in DEP_CONFIG.items():
+        print(f"  Fetching {pkg}...")
+        version = config.get("version")
+        req = f"{pkg}=={version}" if version else pkg
+
+        if config.get("universal"):
+            # Download pure-python universal wheel
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "download",
+                    req,
+                    "--no-deps",
+                    "--dest",
+                    str(wheels_dir),
+                ],
+                check=True,
+            )
+        else:
+            # Download platform/version specific wheels
+            for platform in config["platforms"]:
+                for py_ver in config["py_versions"]:
+                    subprocess.run(
+                        [
+                            sys.executable,
+                            "-m",
+                            "pip",
+                            "download",
+                            req,
+                            "--no-deps",
+                            "--only-binary=:all:",
+                            "--platform",
+                            platform,
+                            "--python-version",
+                            py_ver,
+                            "--dest",
+                            str(wheels_dir),
+                        ],
+                        check=True,
+                    )
+
+    update_manifest_wheels()
+
+
+def update_manifest_wheels():
+    """Scan wheels/ directory and update blender_manifest.toml."""
+    root_dir = Path(__file__).parent
+    manifest_path = root_dir / "blender_manifest.toml"
+    wheels_dir = root_dir / "wheels"
+
+    if not manifest_path.exists():
+        print("❌ Error: blender_manifest.toml not found")
+        return
+
+    # Collect all wheel paths relative to project root
+    wheel_paths = []
+    if wheels_dir.exists():
+        for whl in sorted(wheels_dir.glob("*.whl")):
+            wheel_paths.append(f'    "./wheels/{whl.name}",')
+
+    # Update manifest file using markers
+    content = manifest_path.read_text()
+    marker_start = "# BEGIN AUTOMATED WHEELS"
+    marker_end = "# END AUTOMATED WHEELS"
+
+    if marker_start not in content or marker_end not in content:
+        print("⚠️  Warning: Automation markers not found in manifest. Skipping auto-update.")
+        return
+
+    new_section = f"{marker_start}\nwheels = [\n" + "\n".join(wheel_paths) + f"\n]\n{marker_end}"
+    pattern = re.escape(marker_start) + r".*?" + re.escape(marker_end)
+    new_content = re.sub(pattern, new_section, content, flags=re.DOTALL)
+
+    manifest_path.write_text(new_content)
+    print("✅ Updated blender_manifest.toml with bundled wheels")
+
+
+def is_excluded(path: Path, root: Path, patterns: list[str]) -> bool:
+    """Check if a path matches any exclusion patterns."""
+    rel_path = str(path.relative_to(root))
+    for pattern in patterns:
+        if fnmatch.fnmatch(rel_path, pattern) or fnmatch.fnmatch(path.name, pattern):
+            return True
+        # Check if any parent directory matches
+        for parent in path.parents:
+            if parent == root:
+                break
+            if fnmatch.fnmatch(str(parent.relative_to(root)), pattern.rstrip("/")):
+                return True
+    return False
+
+
+def build_extension() -> Path:
+    """Build the Blender Extension package."""
+    root_dir = Path(__file__).parent
+    version = read_manifest_value("version")
+    dist_dir = root_dir / "dist"
+    dist_dir.mkdir(exist_ok=True)
+
+    output_file = dist_dir / f"linkforge-{version}.zip"
+
+    print(f"📦 Building LinkForge Extension v{version}")
+
+    # Exclude patterns (standard for python/blender projects)
+    exclude_patterns = [
+        "**/__pycache__",
+        "*.pyc",
+        "venv",
+        ".*",
+        "tests",
+        "docs",
+        "dist",
+        "uv.lock",
+        "pyproject.toml",
+        "build_extension.py",
+        "clean.sh",
+        "coverage.xml",
+        ".coverage",
+    ]
+
+    with ZipFile(output_file, "w", ZIP_DEFLATED) as zipf:
+        # 1. Base files
+        for f in ["blender_manifest.toml", "LICENSE", "README.md", "THIRD_PARTY_LICENSES.md"]:
+            file_path = root_dir / f
+            if file_path.exists():
+                zipf.write(file_path, f)
+                print(f"  Added: {f}")
+
+        # 2. Source code (Flatten to root for Blender Extension)
+        src_dir = root_dir / "linkforge"
+        for py_file in src_dir.rglob("*.py"):
+            if is_excluded(py_file, root_dir, exclude_patterns):
+                continue
+            rel = py_file.relative_to(src_dir)
+            zipf.write(py_file, rel)
+            print(f"  Added: {rel}")
+
+        # 3. Examples (Keep directory)
+        examples_dir = root_dir / "examples"
+        if examples_dir.exists():
+            for ex in examples_dir.rglob("*"):
+                if ex.is_file() and not is_excluded(ex, root_dir, exclude_patterns):
+                    rel = ex.relative_to(root_dir)
+                    zipf.write(ex, rel)
+                    print(f"  Added: {rel}")
+
+        # 4. Tools (Keep directory)
+        tools_dir = root_dir / "tools"
+        if tools_dir.exists():
+            for tool in tools_dir.rglob("*.py"):
+                if tool.is_file() and not is_excluded(tool, root_dir, exclude_patterns):
+                    rel = tool.relative_to(root_dir)
+                    zipf.write(tool, rel)
+                    print(f"  Added: {rel}")
+
+        # 5. Bundled wheels
+        wheels_dir = root_dir / "wheels"
+        if wheels_dir.exists():
+            for whl in wheels_dir.glob("*.whl"):
+                rel = f"wheels/{whl.name}"
+                zipf.write(whl, rel)
+                print(f"  Added: {rel}")
+
+    print(f"\n✅ Created: {output_file} ({output_file.stat().st_size / 1024:.1f} KB)")
+    print("\nNext steps: Drag & Drop the zip into Blender or use 'Install from Disk'")
+    return output_file
+
+
+def clean():
+    """Clean build artifacts."""
+    root_dir = Path(__file__).parent
+    for d in ["dist", "wheels"]:
+        path = root_dir / d
+        if path.exists():
+            shutil.rmtree(path)
+            print(f"🗑️  Removed {d}/")
+
+
+if __name__ == "__main__":
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "build"
+
+    if cmd == "sync":
+        sync_dependencies()
+    elif cmd == "build":
+        # Auto-update manifest before build if markers exist
+        update_manifest_wheels()
+        build_extension()
+    elif cmd == "clean":
+        clean()
+    else:
+        print(f"Unknown command: {cmd}")
+        print("Usage: python build_extension.py [sync|build|clean]")

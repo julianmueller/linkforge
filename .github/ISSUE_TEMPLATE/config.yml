@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Documentation
+    url: https://linkforge.readthedocs.io/
+    about: Please check the user guide and API reference before opening an issue.
+  - name: 💬 Community Discussions
+    url: https://github.com/arounamounchili/linkforge/discussions
+    about: Ask questions, share your robots, and get help from the community.

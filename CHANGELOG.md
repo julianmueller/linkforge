@@ -43,7 +43,7 @@ Edit > Preferences > Get Extensions > Install from Disk
 ```
 
 **Documentation:**
-- [Architecture Guide](https://github.com/arounamounchili/linkforge/blob/main/docs/source/explanation/ARCHITECTURE.md)
+- [Architecture Guide](https://linkforge.readthedocs.io/en/latest/explanation/ARCHITECTURE.html)
 - [Contributing Guide](CONTRIBUTING.md)
 
 **Contributors:**

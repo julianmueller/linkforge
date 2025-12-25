@@ -93,7 +93,7 @@ linkforge/
 └── build_extension.py    # Extension builder script
 ```
 
-See [ARCHITECTURE](docs/source/explanation/ARCHITECTURE.md) for detailed architecture diagrams.
+See [ARCHITECTURE](https://linkforge.readthedocs.io/en/latest/explanation/ARCHITECTURE.html) for detailed architecture diagrams.
 
 ## Development Workflow
 
@@ -455,7 +455,7 @@ subprocess.run(["pytest", "tests/integration/"])
 
 ## Getting Help
 
-- **Documentation**: Check [ARCHITECTURE](docs/source/explanation/ARCHITECTURE.md) and [README.md](README.md)
+- **Documentation**: Check [ARCHITECTURE](https://linkforge.readthedocs.io/en/latest/explanation/ARCHITECTURE.html) and [README.md](README.md)
 - **Issues**: Search [existing issues](https://github.com/arounamounchili/linkforge/issues)
 - **Discussions**: Ask in [GitHub Discussions](https://github.com/arounamounchili/linkforge/discussions)
 

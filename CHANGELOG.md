@@ -13,7 +13,7 @@ LinkForge 1.0.0 is the first production-ready release of the professional URDF &
 
 ### Features
 - **Complete URDF/XACRO Support**: Full bidirectional import and export logic.
-- **Sensor Suite**: Comprehensive support for Camera, Depth Camera, LiDAR (GPU & CPU), IMU, GPS, Contact, and Force/Torque sensors.
+- **Sensor Suite**: Comprehensive support for Camera, Depth Camera, LiDAR, IMU, GPS, Contact, and Force/Torque sensors.
 - **ROS2 Control Integration**: Native `ros2_control` configuration generation for Gazebo and real hardware interfaces.
 - **Automatic Physics**: Automatic calculation of mass and inertia tensors for both primitive shapes and complex meshes.
 - **Smart Validation**: Built-in validator to catch errors like disconnected links, missing inertia, or invalid joint limits before export.
@@ -43,7 +43,7 @@ Edit > Preferences > Get Extensions > Install from Disk
 ```
 
 **Documentation:**
-- [Architecture Guide](ARCHITECTURE.md)
+- [Architecture Guide](explanation/ARCHITECTURE)
 - [Contributing Guide](CONTRIBUTING.md)
 
 **Contributors:**

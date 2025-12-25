@@ -28,6 +28,7 @@ extensions = [
     "sphinx.ext.coverage",
     "sphinx_autodoc_typehints",
     "myst_parser",
+    "sphinx_design",
     "sphinxcontrib.mermaid",
 ]
 

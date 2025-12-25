@@ -57,7 +57,7 @@ Following the **Diátaxis framework**, our documentation is organized into four 
 :hidden:
 :caption: Tutorials
 
-tutorials/building_diff_drive
+tutorials/index
 ```
 
 ```{toctree}
@@ -65,7 +65,7 @@ tutorials/building_diff_drive
 :hidden:
 :caption: How-to Guides
 
-how_to/add_sensors
+how_to/index
 ```
 
 ```{toctree}
@@ -73,8 +73,7 @@ how_to/add_sensors
 :hidden:
 :caption: Explanation
 
-explanation/ARCHITECTURE
-explanation/data_model
+explanation/index
 ```
 
 ```{toctree}
@@ -82,9 +81,10 @@ explanation/data_model
 :hidden:
 :caption: Reference
 
-reference/api/index
+reference/index
 CHANGELOG
 CONTRIBUTING
+README
 LICENSE
 ```
 

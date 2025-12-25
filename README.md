@@ -122,8 +122,8 @@ Complete examples in `examples/` directory:
 
 ## 🎓 Documentation
 
-- **[User Guide](https://linkforge.readthedocs.io/en/latest/getting_started.html)** - Getting started and usage instructions
-- **[API Reference](https://linkforge.readthedocs.io/en/latest/api/index.html)** - Programmatic usage
+- **[User Guide](https://linkforge.readthedocs.io/en/latest/tutorials/building_diff_drive.html)** - Getting started and usage instructions
+- **[API Reference](https://linkforge.readthedocs.io/en/latest/reference/api/index.html)** - Programmatic usage
 - **Examples**: [examples/](https://github.com/arounamounchili/linkforge/tree/main/examples)
 
 ## 💻 Development
@@ -181,9 +181,9 @@ LinkForge uses a "Self-Contained" bundling strategy for wheels. To update or add
 ## 📚 Documentation
 
 - **[Read the Docs](https://linkforge.readthedocs.io/)** - Complete documentation
-- **[Architecture Guide](ARCHITECTURE.md)** - System design with diagrams
-- **[API Reference](https://linkforge.readthedocs.io/en/latest/api/)** - Programmatic usage
-- **[Getting Started](https://linkforge.readthedocs.io/en/latest/getting_started/)** - User guide
+- **[Architecture Guide](explanation/ARCHITECTURE)** - System design with diagrams
+- **[API Reference](https://linkforge.readthedocs.io/en/latest/reference/api/)** - Programmatic usage
+- **[Getting Started](https://linkforge.readthedocs.io/en/latest/tutorials/index.html)** - User guide
 - **[CHANGELOG](CHANGELOG.md)** - Version history
 
 ## 🎓 Learning Resources

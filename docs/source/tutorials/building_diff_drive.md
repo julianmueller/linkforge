@@ -30,11 +30,11 @@ graph TD
    - With the cube selected, click **Create Link**.
    - Name it `base_link`.
    - Set **Mass** to `5.0` kg.
-   - Click **Calculate Inertia** (LinkForge will automatically generate the inertia tensor for the box).
+   - Enable **Auto-Calculate Inertia** (LinkForge will automatically generate the inertia tensor for the box).
 
 ::: {admonition} Tip
 :class: tip
-Always use LinkForge's **Calculate Inertia** button rather than entering values manually. It ensures the physical consistency required by simulation engines like Gazebo.
+Always keep LinkForge's **Auto-Calculate Inertia** checkbox enabled rather than entering values manually. It ensures the physical consistency required by simulation engines like Gazebo.
 :::
 
 ## Step 2: Create the Wheels

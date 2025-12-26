@@ -8,7 +8,7 @@ This guide provides solutions to common issues encountered when building, valida
 **Symptoms**: The robot spins uncontrollably or collapses upon spawning.
 **Solution**: 
 - Check your **Joint Axes**. If a joint axis is misaligned with the visual orientation, the physics engine will apply forces in the wrong direction.
-- Verify **Inertial Values**. Tiny or zero inertia values (`ixx`, `iyy`, `izz`) cause numerical instability. Use the **Calculate Inertia** button in the LinkForge panel.
+- Verify **Inertial Values**. Tiny or zero inertia values (`ixx`, `iyy`, `izz`) cause numerical instability. Keep the **Auto-Calculate Inertia** checkbox enabled in the LinkForge panel.
 
 ### Joints are not moving
 **Symptoms**: The robot is stiff, and ROS 2 commands have no effect.

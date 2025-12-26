@@ -10,8 +10,10 @@ A sensor in URDF is usually attached to a specific link. You can either attach i
 
 ## 2. Attaching the Sensor
 1. Select the link that should hold the sensor in the 3D Viewport.
-2. Open the **LinkForge** panel and navigate to the **Sensors** tab.
+2. Open the **LinkForge** panel and navigate to the **Perceive** tab.
 3. Click **Add Sensor**.
+
+![Sensor Panel](../_static/screenshots/sensor_01_panel.png)
 
 ## 3. Configuration
 Once added, you can configure the sensor properties:
@@ -20,7 +22,7 @@ Once added, you can configure the sensor properties:
 - **Noise Models**: Add Gaussian noise to simulate real-world sensor inaccuracies.
 
 ### Common Sensor Types:
-- **LiDAR**: Requires `<ray>` configuration for samples and range.
+- **LIDAR**: Select `LIDAR` in the dropdown (exports as `<gpu_lidar>`). Requires `<ray>` configuration for samples and range.
 - **Camera**: Requires resolution and focal length settings.
 - **IMU**: Provides orientation and acceleration data.
 

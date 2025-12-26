@@ -32,6 +32,8 @@ graph TD
    - Set **Mass** to `5.0` kg.
    - Enable **Auto-Calculate Inertia** (LinkForge will automatically generate the inertia tensor for the box).
 
+![Creating the Base Link](../_static/screenshots/tutorial_01_create_link.png)
+
 ::: {admonition} Tip
 :class: tip
 Always keep LinkForge's **Auto-Calculate Inertia** checkbox enabled rather than entering values manually. It ensures the physical consistency required by simulation engines like Gazebo.
@@ -42,11 +44,19 @@ Always keep LinkForge's **Auto-Calculate Inertia** checkbox enabled rather than 
 1. **Add a Cylinder**: `Shift + A` > **Mesh > Cylinder**.
 2. **Dimensions**: Set Radius to `0.1m` and Depth to `0.05m`.
 3. **Rotate**: Rotate it 90 degrees on the X-axis so it looks like a wheel.
-4. **Forge the Link**:
-   - Click **Create Link**.
-   - Name it `left_wheel`.
-   - Set **Mass** to `0.5` kg.
-5. **Duplicate**: Press `Shift + D` and call the new one `right_wheel`.
+4. **Duplicate**: Press `Shift + D` and move the new cylinder to the other side. You now have two generic cylinder meshes.
+
+### Forge the Left Wheel
+1. Select the first cylinder.
+2. Click **Create Link**.
+3. Name it `left_wheel`.
+4. Set **Mass** to `0.5` kg.
+
+### Forge the Right Wheel
+1. Select the second cylinder.
+2. Click **Create Link**.
+3. Name it `right_wheel`.
+4. Set **Mass** to `0.5` kg.
 
 ## Step 3: Connect with Joints
 
@@ -56,6 +66,9 @@ Always keep LinkForge's **Auto-Calculate Inertia** checkbox enabled rather than 
    - **Type**: Select `continuous` (wheels don't have limits).
    - **Parent**: Select `base_link`.
    - **Axis**: Set to `(0, 1, 0)` if your wheel rotates around the Y-axis.
+
+![Connecting the Wheels](../_static/screenshots/tutorial_02_joint_setup.png)
+
 2. **Connect Right Wheel**:
    - Repeat the process for `right_wheel`, connecting it to `base_link`.
 
@@ -65,10 +78,12 @@ Always keep LinkForge's **Auto-Calculate Inertia** checkbox enabled rather than 
 2. **Create Link**: Call it `lidar_link`.
 3. **Create Fixed Joint**: Connect `lidar_link` to `base_link` using a `fixed` joint type.
 4. **Attach Sensor**:
-   - Go to the **Sensors** tab in LinkForge.
+   - Go to the **Perceive** tab in LinkForge (often referred to as the Sensors panel).
    - With `lidar_link` selected, click **Add Sensor**.
-   - Select **Type**: `gpu_lidar`.
+   - Select **Type**: `LIDAR` (LinkForge exports this as `gpu_lidar` for modern Gazebo).
    - Set **Update Rate** to `30` Hz.
+
+![Attaching the Lidar](../_static/screenshots/tutorial_03_final_robot.png)
 
 ## Step 5: Validate and Export
 

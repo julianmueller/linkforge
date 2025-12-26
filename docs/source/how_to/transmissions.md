@@ -3,14 +3,14 @@
 This guide explains how to set up transmissions and `ros2_control` interfaces for your actuated joints.
 
 ## 1. Enable Control
-Before adding transmissions, ensure the global control setting is enabled:
+To export valid ROS 2 control tags, you must enable the feature. This can be done at any time before export:
 1. Go to the **Robot** tab in the LinkForge panel.
 2. Check **Enable ros2_control**.
-3. (Optional) Set the hardware system name (default: `GazeboSimSystem`).
+3. **Hardware System**: This is automatically set to `GazeboSimSystem` (standard for Gazebo Sim). You usually don't need to change this unless you are writing a custom hardware interface.
 
 ## 2. Add a Transmission
 1. Select the **Joint** you want to actuate (either in the viewport or via the Outliner).
-2. Go to the **Transmissions** tab in LinkForge.
+2. Go to the **Control** tab in LinkForge.
 3. Click **Add Transmission**.
 
 ## 3. Configure Hardware Interfaces

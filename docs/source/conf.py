@@ -54,6 +54,7 @@ html_theme_options = {
 }
 
 # SEO & Social Media Metadata
+html_favicon = "_static/linkforge_logo.png"
 html_context = {
     "display_github": True,
     "github_user": "arounamounchili",

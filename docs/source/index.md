@@ -120,9 +120,16 @@ explanation/index
 ```{toctree}
 :maxdepth: 2
 :hidden:
-:caption: Reference
+:caption: API Reference
 
 reference/index
+```
+
+```{toctree}
+:maxdepth: 2
+:hidden:
+:caption: About LinkForge
+
 CHANGELOG
 CONTRIBUTING
 README

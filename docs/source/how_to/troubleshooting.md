@@ -16,6 +16,26 @@ This guide provides solutions to common issues encountered when building, valida
 - Ensure you have added a **Transmission** to the joint.
 - Check that the **Hardware Interface** (position, velocity, effort) matches what your controller expects.
 
+## Blender-Specific Modeling Issues
+
+### Object vs. Mesh Data confusion
+**Symptoms**: You change the mass of one link, and all other identical links change too.
+**Solution**: 
+- LinkForge stores some properties at the **Mesh Data** level to allow for efficient XACRO macro generation.
+- If you need a link to have unique mass/inertia while sharing geometry, make the mesh data single-user in Blender (`Object > Relations > Make Single User > Object & Data`).
+
+### Floating/Disconnected Links
+**Symptoms**: The robot collapses or parts of it don't move with the rest.
+**Solution**:
+- Use the **LinkForge Validation** panel. It will highlight links that aren't part of the main kinematic tree.
+- Ensure every link (except the root) has a parent joint connecting it to another link.
+
+### "Inverted" Joints
+**Symptoms**: A revolute joint rotates in the opposite direction of your command.
+**Solution**:
+- Select the joint in Blender and look for the **Joint Axis** visual arrow.
+- Flip the axis in the Joint Panel or rotate the joint's local coordinate system in Blender.
+
 ## Export & Import Issues
 
 ### Mesh path not found

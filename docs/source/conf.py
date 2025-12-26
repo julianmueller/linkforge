@@ -40,6 +40,7 @@ exclude_patterns = ["examples"]
 
 html_theme = "sphinx_rtd_theme"
 html_static_path = ["_static"]
+html_logo = "_static/linkforge_logo.png"
 
 # -- Options for HTML output -------------------------------------------------
 
@@ -49,7 +50,26 @@ html_theme_options = {
     "navigation_depth": 3,
     "includehidden": True,
     "titles_only": False,
+    "logo_only": False,
 }
+
+# SEO & Social Media Metadata
+html_context = {
+    "display_github": True,
+    "github_user": "arounamounchili",
+    "github_repo": "linkforge",
+    "github_version": "main",
+    "conf_py_path": "/docs/source/",
+    "metatags": """
+        <meta property="og:title" content="LinkForge - Professional URDF/XACRO Exporter for Blender" />
+        <meta property="og:description" content="A professional Blender extension for roboticists. Model in Blender, simulate in ROS2/Gazebo." />
+        <meta property="og:image" content="https://linkforge.readthedocs.io/en/latest/_static/social_preview.png" />
+        <meta name="twitter:card" content="summary_large_image" />
+    """,
+}
+
+# Disable 'View page source' for a cleaner professional look
+html_show_sourcelink = False
 
 # Custom CSS
 def setup(app):

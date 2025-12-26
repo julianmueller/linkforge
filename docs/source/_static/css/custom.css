@@ -31,6 +31,16 @@
 
 .wy-side-nav-search {
     background-color: #2b2b2b !important;
+    padding: 15px 15px !important;
+    /* Add space around the search/logo area */
+}
+
+/* Limit logo size */
+.wy-side-nav-search img.logo {
+    max-width: 110px !important;
+    height: auto !important;
+    margin-bottom: 15px !important;
+    background-color: transparent !important;
 }
 
 /* Typography */

@@ -129,6 +129,17 @@ README
 LICENSE
 ```
 
+---
+
+> [!NOTE]
+> **Scientific Accuracy**: LinkForge is built for precision. All inertia calculations use solid-body dynamics formulas to ensure simulation fidelity.
+
+## 👥 Community & Support
+
+- **Found a bug?** Open an issue on our [GitHub Issue Tracker](https://github.com/arounamounchili/linkforge/issues).
+- **Have a question?** Join the discussion on [GitHub Discussions](https://github.com/arounamounchili/linkforge/discussions).
+- **Want to contribute?** We love PRs! Read our [Contributing Guide](CONTRIBUTING).
+
 ## Quick Links
 
 - [GitHub Repository](https://github.com/arounamounchili/linkforge)

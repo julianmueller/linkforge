@@ -5,6 +5,7 @@ How-to guides are **task-oriented**. They provide specific "recipes" to help you
 ```{toctree}
 :maxdepth: 1
 
+best_practices
 add_sensors
 transmissions
 joint_viz

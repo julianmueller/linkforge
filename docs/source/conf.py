@@ -41,6 +41,20 @@ exclude_patterns = ["examples"]
 html_theme = "sphinx_rtd_theme"
 html_static_path = ["_static"]
 
+# -- Options for HTML output -------------------------------------------------
+
+html_theme_options = {
+    "collapse_navigation": False,
+    "sticky_navigation": True,
+    "navigation_depth": 3,
+    "includehidden": True,
+    "titles_only": False,
+}
+
+# Custom CSS
+def setup(app):
+    app.add_css_file("css/custom.css")
+
 # -- Extension configuration -------------------------------------------------
 
 # Napoleon settings (Google-style docstrings)

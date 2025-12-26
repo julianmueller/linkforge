@@ -2,8 +2,6 @@
 
 Welcome to the official LinkForge documentation. LinkForge is a professional Blender extension designed to bridge the gap between 3D modeling and robotics simulation.
 
-Following the **Diátaxis framework**, our documentation is organized into four sections to help you find exactly what you need.
-
 ## 🔄 Workflow at a Glance
 
 ```mermaid
@@ -14,6 +12,38 @@ graph LR
     C -- Success --> D[Export URDF/XACRO]
     D --> E[ROS 2 / Gazebo Simulation]
 ```
+
+---
+
+## 🚀 Key Features
+
+LinkForge removes the friction from robotics modeling:
+
+- **Bidirectional Workflow**: Import existing URDF/XACRO files or build from scratch.
+- **Production-Ready Export**: Strictly compliant URDF/XACRO files optimized for ROS/Gazebo.
+- **Smart Validation**: Built-in integrity checker for robot topology and physics.
+- **ROS2 Control Support**: Automatic hardware interface configuration.
+- **Complete Sensor Suite**: Integrated support for LiDAR, IMU, Depth Cameras, and more.
+- **Automatic Physics**: Mass properties and inertia tensor calculation.
+
+---
+
+## 📦 Installation
+
+**Requirements**: Blender 4.2 or later
+
+1.  Open Blender → **Edit > Preferences > Get Extensions**
+2.  Search for **"LinkForge"**
+3.  Click **Install**
+
+---
+
+## 🎯 Quick Start
+
+1.  **Create Links**: Select a mesh and click **Create Link** in the LinkForge panel.
+2.  **Connect Joints**: Select child link and click **Create Joint**.
+3.  **Add Sensors**: Attach cameras or LiDARs to your links.
+4.  **Validate & Export**: Run the validator and export to URDF or XACRO.
 
 ---
 

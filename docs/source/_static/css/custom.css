@@ -1,0 +1,58 @@
+/* Custom styles for LinkForge Documentation */
+
+/* Improve Mermaid diagram display */
+.mermaid {
+    background-color: transparent !important;
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.mermaid svg {
+    max-width: 100% !important;
+    height: auto !important;
+}
+
+/* Landing page grid styling */
+.sd-card {
+    border-radius: 8px !important;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1) !important;
+    transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out !important;
+}
+
+.sd-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1) !important;
+}
+
+/* Sidebar adjustments */
+.wy-nav-side {
+    background: #343131 !important;
+}
+
+.wy-side-nav-search {
+    background-color: #2b2b2b !important;
+}
+
+/* Typography */
+h1,
+h2,
+h3 {
+    color: #2c3e50;
+    font-weight: 600;
+}
+
+/* Layout width adjustment */
+.wy-nav-content {
+    max-width: 1200px !important;
+    /* Increase from default 800px */
+}
+
+/* Balance the 'empty' right side feeling */
+.wy-nav-content-wrap {
+    background: #fcfcfc;
+}
+
+/* Improve header layout */
+.wy-nav-top {
+    background: #343131 !important;
+}

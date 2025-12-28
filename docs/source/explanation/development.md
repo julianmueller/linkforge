@@ -51,10 +51,10 @@ To package LinkForge as a Blender extension:
 
 ```bash
 # General build (automatic wheel bundling)
-python build_extension.py
+python3 build_extension.py
 
 # Sync dependencies (update wheels for all platforms)
-python build_extension.py sync
+python3 build_extension.py sync
 ```
 
 The package will be created in the `dist/` directory.
@@ -62,4 +62,4 @@ The package will be created in the `dist/` directory.
 ### Managing Dependencies
 LinkForge uses a "Self-Contained" bundling strategy. To update dependencies:
 1. Update the `DEP_CONFIG` dictionary in `build_extension.py`.
-2. Run `python build_extension.py sync` to download wheels for all supported platforms.
+2. Run `python3 build_extension.py sync` to download wheels for all supported platforms.

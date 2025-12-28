@@ -6,9 +6,9 @@ This script manages dependencies, updates the manifest, and creates a .zip packa
 2. build: Packages the extension into a .zip file.
 
 Usage:
-    python build_extension.py sync   # Update dependencies and manifest
-    python build_extension.py build  # Create the extension package
-    python build_extension.py clean  # Remove build artifacts
+    python3 build_extension.py sync   # Update dependencies and manifest
+    python3 build_extension.py build  # Create the extension package
+    python3 build_extension.py clean  # Remove build artifacts
 """
 
 from __future__ import annotations
@@ -31,13 +31,13 @@ except ImportError:
 # Packages to bundle as wheels for cross-platform/cross-version compatibility
 DEP_CONFIG = {
     "PyYAML": {
-        "version": "6.0.1",
+        "version": "6.0.3",
         "platforms": ["win_amd64", "manylinux2014_x86_64", "macosx_11_0_arm64"],
         "py_versions": ["310", "311"],
     },
     "xacrodoc": {"version": "1.3.0", "universal": True},
-    "rospkg": {"version": "1.6.0", "universal": True},
-    "docutils": {"version": "0.22.2", "universal": True},
+    "rospkg": {"version": "1.6.1", "universal": True},
+    "docutils": {"version": "0.21.2", "universal": True},
 }
 
 
@@ -55,9 +55,14 @@ def sync_dependencies():
     """Download required wheels and update the manifest."""
     root_dir = Path(__file__).parent
     wheels_dir = root_dir / "wheels"
-    wheels_dir.mkdir(exist_ok=True)
 
     print("🔄 Syncing dependencies...")
+
+    # Clear existing wheels to ensure a clean slate and avoid duplicates
+    if wheels_dir.exists():
+        print(f"  Cleaning existing wheels in {wheels_dir.name}/...")
+        shutil.rmtree(wheels_dir)
+    wheels_dir.mkdir(exist_ok=True)
 
     for pkg, config in DEP_CONFIG.items():
         print(f"  Fetching {pkg}...")
@@ -252,4 +257,4 @@ if __name__ == "__main__":
         clean()
     else:
         print(f"Unknown command: {cmd}")
-        print("Usage: python build_extension.py [sync|build|clean]")
+        print("Usage: python3 build_extension.py [sync|build|clean]")

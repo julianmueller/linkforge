@@ -355,16 +355,16 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "docutils", specifier = ">=0.18,!=0.21" },
+    { name = "docutils", specifier = "==0.21.2" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.18.0" },
     { name = "myst-parser", marker = "extra == 'docs'", specifier = ">=4.0.1" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.15.0" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "pyyaml", specifier = "==6.0.3" },
     { name = "pyyaml", marker = "extra == 'docs'", specifier = ">=6.0.3" },
-    { name = "rospkg", specifier = ">=1.6.0" },
+    { name = "rospkg", specifier = ">=1.6.1" },
     { name = "rospkg", marker = "extra == 'docs'", specifier = ">=1.6.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.0" },
     { name = "sphinx", marker = "extra == 'docs'", specifier = ">=8.2.3" },
@@ -783,16 +783,16 @@ wheels = [
 
 [[package]]
 name = "rospkg"
-version = "1.6.0"
+version = "1.6.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "catkin-pkg" },
     { name = "distro" },
     { name = "pyyaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ca/15/c74423bc434c7b3a8236fdd2af5f4c4ce3b4a5fd081cfa0fc3066c2f2638/rospkg-1.6.0.tar.gz", hash = "sha256:61c87ab60877388c0874c2e89f506b862918e8ca87b7f2949d9991a4add87036", size = 42642, upload-time = "2025-01-24T23:19:14.604Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4b/c3/29f5da89f346d2fe36fc22af58246f68c705ec363d8cd28be857cff9bb9e/rospkg-1.6.1.tar.gz", hash = "sha256:39aa81fe212c5bd392e20fc9e6000df02e4c8d79765f7a8caf5a9e5e7898d79d", size = 42655, upload-time = "2025-12-19T21:47:05.126Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fa/c1/b0616243c1f922252ceb4513c22abefc1773cf372bfc0b6f7e59c2829f96/rospkg-1.6.0-py3-none-any.whl", hash = "sha256:491d49a0d85969cd99df056122f95fc33ff277992a4e275c4448c2e02220a9cb", size = 36040, upload-time = "2025-01-24T23:19:12.771Z" },
+    { url = "https://files.pythonhosted.org/packages/50/19/1ee204b047ef84ce3dc9f77a5f935076211832f50bc7a4c918275193f807/rospkg-1.6.1-py3-none-any.whl", hash = "sha256:3a09b0ab5c1753536e4a171b480889c6afd65a6573a327ead3e2d3bb2c6f3fcd", size = 36018, upload-time = "2025-12-19T21:47:03.879Z" },
 ]
 
 [[package]]

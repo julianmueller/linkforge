@@ -6,10 +6,10 @@ LinkForge bundles several third-party Python libraries to provide a self-contain
 
 | Library | Version | License | Link |
 | :--- | :--- | :--- | :--- |
-| **PyYAML** | 6.0.1 | [MIT](https://spdx.org/licenses/MIT.html) | [pyyaml.org](https://pyyaml.org/) |
+| **PyYAML** | 6.0.3 | [MIT](https://spdx.org/licenses/MIT.html) | [pyyaml.org](https://pyyaml.org/) |
 | **xacrodoc** | 1.3.0 | [MIT](https://spdx.org/licenses/MIT.html) | [adamheins/xacrodoc](https://github.com/adamheins/xacrodoc) |
-| **rospkg** | 1.6.0 | [BSD-3-Clause](https://spdx.org/licenses/BSD-3-Clause.html) | [ROS Wiki](http://wiki.ros.org/rospkg) |
-| **docutils** | 0.22.2 | [BSD-2-Clause / Other](https://docutils.sourceforge.io/COPYING.html) | [SourceForge](https://docutils.sourceforge.io/) |
+| **rospkg** | 1.6.1 | [BSD-3-Clause](https://spdx.org/licenses/BSD-3-Clause.html) | [ROS Wiki](http://wiki.ros.org/rospkg) |
+| **docutils** | 0.21.2 | [Public Domain / BSD-2-Clause](https://docutils.sourceforge.io/COPYING.html) | [SourceForge](https://docutils.sourceforge.io/) |
 
 ## Bundled Components
 
@@ -17,12 +17,12 @@ All libraries listed below are bundled as `.whl` files in the `wheels/` director
 
 ### PyYAML
 - **License**: MIT
-- **Copyright**: &copy; 2006-2016 Kirill Simonov, &copy; 2017-2021 Ingy döt Net
+- **Copyright**: &copy; 2006-2016 Kirill Simonov, &copy; 2017-2024 Ingy döt Net and the YAML community
 - **Summary**: YAML parser and issuer for Python.
 
 ### xacrodoc
 - **License**: MIT
-- **Copyright**: &copy; 2023 Adam Heins
+- **Copyright**: &copy; 2023-2025 Adam Heins
 - **Summary**: Programmatic interface for Xacro.
 
 ### rospkg
@@ -32,7 +32,7 @@ All libraries listed below are bundled as `.whl` files in the `wheels/` director
 
 ### docutils
 - **License**: Public Domain / BSD-2-Clause
-- **Copyright**: &copy; David Goodger and others
+- **Copyright**: &copy; David Goodger and others (dedicated to the public domain)
 - **Summary**: Documentation utilities (dependency for xacrodoc).
 
 ---

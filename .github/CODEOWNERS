@@ -1,9 +1,0 @@
-# LinkForge Code Owners
-# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
-
-# Global owners (Maintainers)
-*       @arounamounchili
-
-# Specific areas
-/docs/  @arounamounchili
-/tests/ @arounamounchili

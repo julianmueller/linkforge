@@ -5,6 +5,38 @@
             "package-name": "linkforge",
             "extra-files": [
                 "blender_manifest.toml"
+            ],
+            "changelog-sections": [
+                {
+                    "type": "feat",
+                    "section": "🚀 Features",
+                    "hidden": false
+                },
+                {
+                    "type": "fix",
+                    "section": "🐞 Bug Fixes",
+                    "hidden": false
+                },
+                {
+                    "type": "docs",
+                    "section": "📚 Documentation",
+                    "hidden": false
+                },
+                {
+                    "type": "perf",
+                    "section": "⚡ Performance Updates",
+                    "hidden": false
+                },
+                {
+                    "type": "refactor",
+                    "section": "🛠️ Refactors",
+                    "hidden": false
+                },
+                {
+                    "type": "chore",
+                    "section": "🧹 Maintenance",
+                    "hidden": true
+                }
             ]
         }
     },

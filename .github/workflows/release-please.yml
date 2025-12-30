@@ -19,7 +19,3 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-
-      # Optional: You can add steps here that run ONLY when a release is created
-      # if you want to keep everything in one file, but keeping release.yml 
-      # for the actual build is cleaner for separation of concerns.

@@ -37,8 +37,8 @@ exclude_patterns = ["examples"]
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
 html_theme = "sphinx_rtd_theme"
-html_static_path = ["_static"]
-html_logo = "_static/linkforge_logo.png"
+html_static_path = ["_static", "../assets"]
+html_logo = "linkforge_logo.png"
 
 # -- Options for HTML output -------------------------------------------------
 
@@ -52,7 +52,7 @@ html_theme_options = {
 }
 
 # SEO & Social Media Metadata
-html_favicon = "_static/linkforge_logo.png"
+html_favicon = "linkforge_logo.png"
 html_context = {
     "display_github": True,
     "github_user": "arounamounchili",

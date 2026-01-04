@@ -38,7 +38,7 @@ exclude_patterns = ["examples"]
 
 html_theme = "sphinx_rtd_theme"
 html_static_path = ["_static", "../assets"]
-html_logo = "linkforge_logo.png"
+html_logo = "../assets/linkforge_logo.png"
 
 # -- Options for HTML output -------------------------------------------------
 
@@ -52,7 +52,7 @@ html_theme_options = {
 }
 
 # SEO & Social Media Metadata
-html_favicon = "linkforge_logo.png"
+html_favicon = "../assets/linkforge_logo.png"
 html_context = {
     "display_github": True,
     "github_user": "arounamounchili",

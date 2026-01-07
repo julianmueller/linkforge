@@ -9,7 +9,7 @@ This module contains all Blender-specific code:
 
 from __future__ import annotations
 
-from . import handlers, operators, panels, preferences, properties
+from . import operators, panels, preferences, properties
 from .utils import joint_gizmos
 
 # Registration order matters: properties first, then operators, then panels, then handlers, then gizmos
@@ -18,7 +18,6 @@ modules = [
     preferences,
     operators,
     panels,
-    handlers,
     joint_gizmos,
 ]
 
@@ -43,7 +42,6 @@ __all__ = [
     "preferences",
     "operators",
     "panels",
-    "handlers",
     "joint_gizmos",
     "register",
     "unregister",

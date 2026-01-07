@@ -71,7 +71,6 @@ graph LR
         Panels[Panels<br/>UI Display]
         Operators[Operators<br/>User Actions]
         Properties[Properties<br/>Data Storage]
-        Handlers[Handlers<br/>Event Hooks]
         Utils[Utils<br/>Converters & Helpers]
     end
 
@@ -79,7 +78,6 @@ graph LR
     Operators --> Properties
     Operators --> Utils
     Properties --> Utils
-    Handlers --> Utils
 
     style Panels fill:#4fc3f7
     style Operators fill:#4fc3f7
@@ -96,7 +94,6 @@ graph LR
 | **Operators** | User actions (create, export, etc.) | `export_ops.py`, `link_ops.py`, `joint_ops.py`, `sensor_ops.py`, `transmission_ops.py` |
 | **Properties** | Blender scene data storage | `robot_props.py`, `joint_props.py`, `link_props.py`, `sensor_props.py`, `transmission_props.py` |
 | **Utils** | Conversion between Blender ↔ Core | `converters.py`, `urdf_importer.py`, `mesh_export.py`, `joint_gizmos.py` |
-| **Handlers** | Event listeners (file load, etc.) | `handlers.py` |
 
 ### 2. Core Logic Layer (`linkforge/core/`)
 
@@ -369,7 +366,7 @@ class Robot:
 
 ### Blender Integration
 - **Scene conversion**: O(n) where n = objects in scene
-- **Property updates**: O(1) with Blender's property system
+- **Property updates**: O(1) with Blender's property mirroring
 - **Viewport updates**: Throttled to 60 FPS max
 
 ## Testing Strategy

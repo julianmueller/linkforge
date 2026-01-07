@@ -4,7 +4,7 @@ This module contains all Blender-specific code:
 - Property Groups: Store data on Blender objects
 - Operators: User actions/commands
 - Panels: User interface
-- Handlers: Event handlers for scene updates
+- Handlers: Scene and file load event hooks
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from __future__ import annotations
 from . import operators, panels, preferences, properties
 from .utils import joint_gizmos
 
-# Registration order matters: properties first, then operators, then panels, then handlers, then gizmos
+# Registration order matters: properties first, then operators, then panels, then gizmos
 modules = [
     properties,
     preferences,

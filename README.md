@@ -57,7 +57,7 @@ LinkForge is a professional Blender extension for roboticists.
 3. Click **Install**
 
 ### Method 2: Manual Installation
-1. Download the latest `.zip` package from [Releases](https://github.com/arounamounchili/linkforge/releases/latest)
+1. Download the `.zip` package for your platform (e.g., `linkforge-x.x.x-windows-x64.zip`) from [Latest Releases](https://github.com/arounamounchili/linkforge/releases/latest)
 2. Open Blender → **Edit > Preferences > Get Extensions**
 3. Click dropdown (⌄) → **Install from Disk**
 4. Select the downloaded `.zip` file

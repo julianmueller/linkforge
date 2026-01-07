@@ -3,9 +3,7 @@
         ".": {
             "release-type": "python",
             "extra-files": [
-                "blender_manifest.toml",
-                "docs/source/conf.py",
-                "README.md"
+                "blender_manifest.toml"
             ],
             "changelog-sections": [
                 {

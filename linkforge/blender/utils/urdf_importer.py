@@ -708,9 +708,9 @@ def create_sensor_object(sensor, link_objects: dict, collection=None) -> object 
 
 def create_transmission_object(
     transmission,
-    joint_objects: dict = None,
+    joint_objects: dict | None = None,
     collection=None,
-    explicit_axis: tuple[float, float, float] = None,
+    explicit_axis: tuple[float, float, float] | None = None,
 ) -> object | None:
     """Create Empty object from Transmission model.
 
@@ -1027,9 +1027,10 @@ def import_robot_to_scene(robot: Robot, urdf_path: Path, context) -> bool:
             explicit_axis = None
             if transmission.joints:
                 j_name = transmission.joints[0].name
-                if j_name in joint_model_map and joint_model_map[j_name].axis:
+                if j_name in joint_model_map:
                     ax = joint_model_map[j_name].axis
-                    explicit_axis = (ax.x, ax.y, ax.z)
+                    if ax:
+                        explicit_axis = (ax.x, ax.y, ax.z)
 
             if create_transmission_object(
                 transmission, joint_objects, collection, explicit_axis=explicit_axis
@@ -1068,7 +1069,10 @@ def import_robot_to_scene(robot: Robot, urdf_path: Path, context) -> bool:
                     bpy.ops.object.empty_add(type="SINGLE_ARROW", location=(0, 0, 0))
                     empty = bpy.context.active_object
                     empty.name = f"{joint.name}_trans"
-                    empty.empty_display_size = TRANSMISSION_EMPTY_DISPLAY_SIZE
+
+                    # Set display size from preferences
+                    prefs = get_addon_prefs()
+                    empty.empty_display_size = prefs.transmission_empty_size if prefs else 0.05
 
                     if hasattr(empty, "linkforge_transmission"):
                         props = empty.linkforge_transmission
@@ -1086,9 +1090,10 @@ def import_robot_to_scene(robot: Robot, urdf_path: Path, context) -> bool:
                     # ALIGNMENT: Point arrow along Joint Axis
                     # Reconstruct axis vector from joint props (or model if available)
                     axis_vec = None
-                    if joint.name in joint_model_map and joint_model_map[joint.name].axis:
+                    if joint.name in joint_model_map:
                         ax = joint_model_map[joint.name].axis
-                        axis_vec = (ax.x, ax.y, ax.z)
+                        if ax:
+                            axis_vec = (ax.x, ax.y, ax.z)
 
                     if axis_vec:
                         from mathutils import Vector

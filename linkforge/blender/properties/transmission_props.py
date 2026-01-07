@@ -13,26 +13,22 @@ from bpy.types import PropertyGroup
 from ..utils.property_helpers import find_property_owner
 
 
-def update_transmission_name(self, context):
-    """Update callback when transmission_name changes - sync to object name."""
-    if not bpy:
-        return
+def get_transmission_name(self):
+    """Getter for transmission_name - mirrors the Blender object name."""
+    return self.id_data.name
 
-    # Find the object that owns this property
-    obj = find_property_owner(context, self, "linkforge_transmission")
-    if obj is None:
-        return
 
-    # Only sync if this is marked as a transmission and has a name
-    if not self.is_robot_transmission or not self.transmission_name:
+def set_transmission_name(self, value):
+    """Setter for transmission_name - updates object name."""
+    if not value or not self.id_data:
         return
 
     from .link_props import sanitize_urdf_name
 
-    sanitized_name = sanitize_urdf_name(self.transmission_name)
+    sanitized_name = sanitize_urdf_name(value)
 
-    if obj.name != sanitized_name:
-        obj.name = sanitized_name
+    if self.id_data.name != sanitized_name:
+        self.id_data.name = sanitized_name
 
 
 def update_transmission_hierarchy(self, context):
@@ -44,9 +40,6 @@ def update_transmission_hierarchy(self, context):
     For simple transmissions: uses joint_obj
     For differential transmissions: uses joint1_obj (first joint)
     """
-    if not bpy:
-        return
-
     # Find the transmission object that owns this property
     transmission_obj = find_property_owner(context, self, "linkforge_transmission")
     if transmission_obj is None or not self.is_robot_transmission:
@@ -99,9 +92,9 @@ class TransmissionPropertyGroup(PropertyGroup):
     transmission_name: StringProperty(  # type: ignore
         name="Transmission Name",
         description="Name of the transmission in URDF (must be unique)",
-        default="",
         maxlen=64,
-        update=update_transmission_name,
+        get=get_transmission_name,
+        set=set_transmission_name,
     )
 
     # Transmission type

@@ -19,29 +19,25 @@ from bpy.types import PropertyGroup
 from ..utils.property_helpers import find_property_owner
 
 
-def update_sensor_name(self, context):
-    """Update callback when sensor_name changes - sync to object name."""
-    if not bpy:
-        return
+def get_sensor_name(self):
+    """Getter for sensor_name - mirrors the Blender object name."""
+    return self.id_data.name
 
-    # Find the object that owns this property
-    obj = find_property_owner(context, self, "linkforge_sensor")
-    if obj is None:
-        return
 
-    # Only sync if this is marked as a sensor and has a name
-    if not self.is_robot_sensor or not self.sensor_name:
+def set_sensor_name(self, value):
+    """Setter for sensor_name - updates object name."""
+    if not value or not self.id_data:
         return
 
     # Import sanitize function from link_props
     from .link_props import sanitize_urdf_name
 
     # Sanitize sensor name for URDF
-    sanitized_name = sanitize_urdf_name(self.sensor_name)
+    sanitized_name = sanitize_urdf_name(value)
 
     # Update object name to match sensor name
-    if obj.name != sanitized_name:
-        obj.name = sanitized_name
+    if self.id_data.name != sanitized_name:
+        self.id_data.name = sanitized_name
 
 
 def update_sensor_hierarchy(self, context):
@@ -50,8 +46,6 @@ def update_sensor_hierarchy(self, context):
     Automatically reparents sensor to new link and moves to link's collection.
     This ensures visual hierarchy matches logical structure.
     """
-    if not bpy:
-        return
 
     # Find the sensor object that owns this property
     sensor_obj = find_property_owner(context, self, "linkforge_sensor")
@@ -97,9 +91,9 @@ class SensorPropertyGroup(PropertyGroup):
     sensor_name: StringProperty(  # type: ignore
         name="Sensor Name",
         description="Name of the sensor in URDF (must be unique)",
-        default="",
         maxlen=64,
-        update=update_sensor_name,
+        get=get_sensor_name,
+        set=set_sensor_name,
     )
 
     # Sensor type

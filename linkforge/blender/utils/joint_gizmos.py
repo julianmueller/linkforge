@@ -209,9 +209,12 @@ def _draw_internal():
 
     # Draw lines (shafts)
     if all_line_positions:
-        # Blender 4.3+ renamed 3D_FLAT_COLOR to FLAT_COLOR
-        shader_name = "FLAT_COLOR" if bpy.app.version >= (4, 3, 0) else "3D_FLAT_COLOR"
-        shader = gpu.shader.from_builtin(shader_name)
+        # Resolve shader name (FLAT_COLOR in 4.3+, 3D_FLAT_COLOR previously)
+        try:
+            shader = gpu.shader.from_builtin("FLAT_COLOR")
+        except Exception:
+            shader = gpu.shader.from_builtin("3D_FLAT_COLOR")
+
         batch = batch_for_shader(
             shader,
             "LINES",
@@ -226,8 +229,11 @@ def _draw_internal():
 
     # Draw triangles (arrow cones)
     if all_tri_positions:
-        shader_name = "FLAT_COLOR" if bpy.app.version >= (4, 3, 0) else "3D_FLAT_COLOR"
-        shader = gpu.shader.from_builtin(shader_name)
+        try:
+            shader = gpu.shader.from_builtin("FLAT_COLOR")
+        except Exception:
+            shader = gpu.shader.from_builtin("3D_FLAT_COLOR")
+
         batch = batch_for_shader(
             shader,
             "TRIS",

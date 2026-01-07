@@ -16,38 +16,28 @@ from bpy.props import (
 from bpy.types import PropertyGroup
 
 from ...core.utils.string_utils import sanitize_name as sanitize_urdf_name
-from ..utils.property_helpers import find_property_owner
 
 
-def update_link_name(self, context):
-    """Update callback when link_name changes - sync to object name and children.
+def get_link_name(self):
+    """Getter for link_name - mirrors the Blender object name."""
+    return self.id_data.name
 
-    This updates both the link Empty object and its visual/collision children
-    to maintain naming consistency. All changes are grouped in the undo stack.
-    """
-    if not bpy:
-        return
 
-    # Find the object that owns this property
-    obj = find_property_owner(context, self, "linkforge")
-    if obj is None:
-        return
-
-    # Only sync if this is marked as a robot link and has a name
-    if not self.is_robot_link or not self.link_name:
+def set_link_name(self, value):
+    """Setter for link_name - updates object name and children."""
+    if not value or not self.id_data:
         return
 
     # Sanitize link name for URDF (remove invalid characters)
-    sanitized_name = sanitize_urdf_name(self.link_name)
+    sanitized_name = sanitize_urdf_name(value)
 
     # Update object name to match link name
     # Note: Blender may append .001, .002 etc if name conflicts exist
-    if obj.name != sanitized_name:
-        obj.name = sanitized_name
+    if self.id_data.name != sanitized_name:
+        self.id_data.name = sanitized_name
 
     # Update visual and collision children names to match
-    # Note: These changes will be part of the same undo block as the property change
-    for child in obj.children:
+    for child in self.id_data.children:
         child_lower = child.name.lower()
         if "_visual" in child_lower:
             # Preserve any suffix like _visual_02
@@ -124,9 +114,9 @@ class LinkPropertyGroup(PropertyGroup):
     link_name: StringProperty(  # type: ignore
         name="Link Name",
         description="Name of the link in URDF (must be unique)",
-        default="",
         maxlen=64,
-        update=update_link_name,
+        get=get_link_name,
+        set=set_link_name,
     )
 
     # Inertial properties

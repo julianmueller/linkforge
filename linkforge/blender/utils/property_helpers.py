@@ -34,10 +34,15 @@ def find_property_owner(context: Any, property_group: Any, property_attr: str) -
         >>>     if obj:
         >>>         obj.name = self.sensor_name
     """
-    if not context:
-        return None
+    # Strategy 1: Check id_data (most reliable and fastest)
+    if hasattr(property_group, "id_data") and property_group.id_data:
+        # Check if id_data is an object and has the expected attribute
+        if isinstance(property_group.id_data, bpy.types.Object):
+            if hasattr(property_group.id_data, property_attr):
+                if getattr(property_group.id_data, property_attr) == property_group:
+                    return property_group.id_data
 
-    # Strategy 1: Check active object first (most common case)
+    # Strategy 2: Check active object (fast fallback)
     if hasattr(context, "object") and context.object:
         if hasattr(context.object, property_attr):
             if getattr(context.object, property_attr) == property_group:

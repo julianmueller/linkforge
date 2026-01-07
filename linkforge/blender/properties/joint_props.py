@@ -12,26 +12,22 @@ from bpy.types import PropertyGroup
 from ..utils.property_helpers import find_property_owner
 
 
-def update_joint_name(self, context):
-    """Update callback when joint_name changes - sync to object name."""
-    if not bpy:
-        return
+def get_joint_name(self):
+    """Getter for joint_name - mirrors the Blender object name."""
+    return self.id_data.name
 
-    # Find the object that owns this property
-    obj = find_property_owner(context, self, "linkforge_joint")
-    if obj is None:
-        return
 
-    # Only sync if this is marked as a robot joint and has a name
-    if not self.is_robot_joint or not self.joint_name:
+def set_joint_name(self, value):
+    """Setter for joint_name - updates object name."""
+    if not value or not self.id_data:
         return
 
     from .link_props import sanitize_urdf_name
 
-    sanitized_name = sanitize_urdf_name(self.joint_name)
+    sanitized_name = sanitize_urdf_name(value)
 
-    if obj.name != sanitized_name:
-        obj.name = sanitized_name
+    if self.id_data.name != sanitized_name:
+        self.id_data.name = sanitized_name
 
 
 def update_joint_hierarchy(self, context):
@@ -109,9 +105,9 @@ class JointPropertyGroup(PropertyGroup):
     joint_name: StringProperty(  # type: ignore
         name="Joint Name",
         description="Name of the joint in URDF (must be unique)",
-        default="",
         maxlen=64,
-        update=update_joint_name,
+        get=get_joint_name,
+        set=set_joint_name,
     )
 
     # Joint type

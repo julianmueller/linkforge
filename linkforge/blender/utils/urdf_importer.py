@@ -17,13 +17,9 @@ from ...core.models import (
     Robot,
     Sphere,
 )
+from ..preferences import get_addon_prefs
 
 logger = get_logger(__name__)
-
-# Empty object display sizes for visual feedback in Blender viewport
-LINK_EMPTY_DISPLAY_SIZE = 0.02  # Very small, just visible enough for selection
-SENSOR_EMPTY_DISPLAY_SIZE = 0.05  # Medium size for sensor markers
-TRANSMISSION_EMPTY_DISPLAY_SIZE = 0.1  # Larger for transmission markers
 
 
 def create_material_from_color(color: Color, name: str):
@@ -181,11 +177,14 @@ def create_link_object(link: Link, urdf_dir: Path, collection=None) -> object | 
 
     """
     # Create an Empty object to represent the link (always)
-    # Use PLAIN_AXES type with very small size for minimal visual clutter
+    # Use PLAIN_AXES type with sizing from preferences
     bpy.ops.object.empty_add(type="PLAIN_AXES", location=(0, 0, 0))
     link_obj = bpy.context.active_object
     link_obj.name = link.name
-    link_obj.empty_display_size = LINK_EMPTY_DISPLAY_SIZE
+
+    # Set display size from preferences
+    prefs = get_addon_prefs()
+    link_obj.empty_display_size = prefs.link_empty_size if prefs else 0.1
 
     # Add to collection
     if collection:
@@ -427,11 +426,9 @@ def create_joint_object(joint: Joint, link_objects: dict, collection=None) -> ob
 
     """
     empty_size = 0.2  # Default fallback
-    from ..preferences import get_addon_prefs
-
-    addon_prefs = get_addon_prefs(bpy.context)
-    if addon_prefs:
-        empty_size = getattr(addon_prefs, "joint_empty_size", empty_size)
+    prefs = get_addon_prefs()
+    if prefs:
+        empty_size = getattr(prefs, "joint_empty_size", empty_size)
 
     # Create Empty object (ARROWS shows RGB colored axes)
     bpy.ops.object.empty_add(type="ARROWS", location=(0, 0, 0))
@@ -575,7 +572,10 @@ def create_sensor_object(sensor, link_objects: dict, collection=None) -> object 
     bpy.ops.object.empty_add(type="SPHERE", location=(0, 0, 0))
     empty = bpy.context.active_object
     empty.name = sensor.name
-    empty.empty_display_size = SENSOR_EMPTY_DISPLAY_SIZE
+
+    # Set display size from preferences
+    prefs = get_addon_prefs()
+    empty.empty_display_size = prefs.sensor_empty_size if prefs else 0.1
 
     # Set sensor properties
     if hasattr(empty, "linkforge_sensor"):
@@ -728,7 +728,10 @@ def create_transmission_object(
     bpy.ops.object.empty_add(type="SINGLE_ARROW", location=(0, 0, 0))
     empty = bpy.context.active_object
     empty.name = transmission.name
-    empty.empty_display_size = TRANSMISSION_EMPTY_DISPLAY_SIZE
+
+    # Set display size from preferences
+    prefs = get_addon_prefs()
+    empty.empty_display_size = prefs.transmission_empty_size if prefs else 0.05
 
     # ALIGNMENT:
     # By default, SINGLE_ARROW points +Z. We want it to point along the Joint Axis.

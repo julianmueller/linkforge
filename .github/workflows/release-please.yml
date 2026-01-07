@@ -48,7 +48,10 @@ jobs:
           mkdir -p blender
           tar -xf blender-4.2.0-linux-x64.tar.xz -C blender --strip-components=1
           echo "$(pwd)/blender" >> $GITHUB_PATH
-          blender --version
+
+      - name: Verify Blender
+        if: ${{ steps.release.outputs.release_created }}
+        run: blender --version
 
       - name: Build extension
         if: ${{ steps.release.outputs.release_created }}

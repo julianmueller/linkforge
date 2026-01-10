@@ -267,10 +267,8 @@ class LINKFORGE_OT_import_urdf(Operator, ImportHelper):
                             f"XACRO import failed: Missing ROS package '{package_name}'.\n\n"
                             f"Solutions:\n"
                             f"1. Use the URDF version of this file instead.\n"
-                            f"2. Use the standalone converter to resolve dependencies:\n"
-                            f"   python tools/convert_xacro.py {urdf_path.name} --package-path /path/to/packages\n"
-                            f"3. Install the required ROS package on your system.\n"
-                            f"4. Edit the XACRO file to use relative paths instead of $(find ...)."
+                            f"2. Install the required ROS package on your system.\n"
+                            f"3. Edit the XACRO file to use relative paths instead of $(find ...)."
                         )
                         self.report({"ERROR"}, error_msg)
                         return {"CANCELLED"}

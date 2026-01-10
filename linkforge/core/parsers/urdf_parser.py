@@ -1238,8 +1238,6 @@ def _detect_xacro_file(root: ET.Element, filepath: Path) -> None:
             "     from xacrodoc import XacroDoc\n"
             "     doc = XacroDoc.from_file('{filepath.name}')\n"
             "     robot = parse_urdf_string(doc.to_urdf_string())\n\n"
-            "  2. Use the standalone converter (handles package dependencies):\n"
-            "     python tools/convert_xacro.py {filepath.name} --package-path /path/to/packages\n"
         )
 
         if xacro_elements:

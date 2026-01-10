@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import bpy
-from bpy.types import Panel
+from bpy.types import Context, Panel
 
 
 class LINKFORGE_PT_control(Panel):
@@ -18,7 +18,7 @@ class LINKFORGE_PT_control(Panel):
     bl_order = 2
     bl_options = {"DEFAULT_CLOSED"}
 
-    def draw(self, context):
+    def draw(self, context: Context):
         """Draw the panel."""
         layout = self.layout
         obj = context.active_object
@@ -114,14 +114,28 @@ class LINKFORGE_PT_control(Panel):
 
 
 # Registration
+classes = [
+    LINKFORGE_PT_control,
+]
+
+
 def register():
     """Register panel."""
-    bpy.utils.register_class(LINKFORGE_PT_control)
+    for cls in classes:
+        try:
+            bpy.utils.register_class(cls)
+        except ValueError:
+            bpy.utils.unregister_class(cls)
+            bpy.utils.register_class(cls)
 
 
 def unregister():
     """Unregister panel."""
-    bpy.utils.unregister_class(LINKFORGE_PT_control)
+    for cls in reversed(classes):
+        try:
+            bpy.utils.unregister_class(cls)
+        except RuntimeError:
+            pass
 
 
 if __name__ == "__main__":

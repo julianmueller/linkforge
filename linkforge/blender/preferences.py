@@ -7,17 +7,17 @@ from __future__ import annotations
 
 import bpy
 from bpy.props import BoolProperty, FloatProperty
-from bpy.types import AddonPreferences
+from bpy.types import AddonPreferences, Context
 
 
-def update_joint_axes_visibility(self, context):
+def update_joint_axes_visibility(self: LinkForgePreferences, context: Context):
     """Callback when show_joint_axes changes - manage draw handler and force viewport redraw."""
     from .utils import joint_gizmos
 
     joint_gizmos.update_viz_handle(context)
 
 
-def update_joint_empty_size(self, context):
+def update_joint_empty_size(self: LinkForgePreferences, context: Context):
     """Callback when joint_empty_size changes - update all joint empties and viewport."""
     # From here, we also need to trigger the draw handler update check
     # so the GPU overlay picks up the new size immediately
@@ -41,7 +41,7 @@ def update_joint_empty_size(self, context):
                 area.tag_redraw()
 
 
-def update_sensor_empty_size(self, context):
+def update_sensor_empty_size(self: LinkForgePreferences, context: Context):
     """Callback when sensor_empty_size changes - update all sensor empties."""
 
     # Get new size
@@ -63,7 +63,7 @@ def update_sensor_empty_size(self, context):
                 area.tag_redraw()
 
 
-def update_transmission_empty_size(self, context):
+def update_transmission_empty_size(self: LinkForgePreferences, context: Context):
     """Callback when transmission_empty_size changes - update all transmission empties."""
 
     # Get new size
@@ -85,7 +85,7 @@ def update_transmission_empty_size(self, context):
                 area.tag_redraw()
 
 
-def update_link_empty_size(self, context):
+def update_link_empty_size(self: LinkForgePreferences, context: Context):
     """Callback when link_empty_size changes - update all link empties."""
 
     # Get new size
@@ -116,7 +116,7 @@ def get_addon_id():
     return pkg.split(".")[0] if pkg else "linkforge"
 
 
-def get_addon_prefs(context=None):
+def get_addon_prefs(context: Context | None = None) -> LinkForgePreferences | None:
     """Retrieve the LinkForge preferences object reliably."""
     if context is None:
         context = bpy.context
@@ -196,7 +196,7 @@ class LinkForgePreferences(AddonPreferences):
         update=update_link_empty_size,  # Update all link empties when changed
     )
 
-    def draw(self, context):
+    def draw(self, context: Context):
         """Draw the preferences UI."""
         layout = self.layout
 
@@ -251,14 +251,29 @@ class LinkForgePreferences(AddonPreferences):
         col.label(text="Use Outliner to select components if empties are too small")
 
 
+# Registration
+classes = [
+    LinkForgePreferences,
+]
+
+
 def register():
     """Register preferences."""
-    bpy.utils.register_class(LinkForgePreferences)
+    for cls in classes:
+        try:
+            bpy.utils.register_class(cls)
+        except ValueError:
+            bpy.utils.unregister_class(cls)
+            bpy.utils.register_class(cls)
 
 
 def unregister():
     """Unregister preferences."""
-    bpy.utils.unregister_class(LinkForgePreferences)
+    for cls in reversed(classes):
+        try:
+            bpy.utils.unregister_class(cls)
+        except RuntimeError:
+            pass
 
 
 if __name__ == "__main__":

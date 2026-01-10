@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import bpy
-from bpy.types import Panel
+from bpy.types import Context, Panel
 
 from ..utils.converters import detect_primitive_type
 
@@ -19,7 +19,7 @@ class LINKFORGE_PT_links(Panel):
     bl_parent_id = "LINKFORGE_PT_build"
     bl_order = 1
 
-    def draw(self, context):
+    def draw(self, context: Context):
         """Draw the panel."""
         layout = self.layout
         obj = context.active_object
@@ -256,7 +256,11 @@ classes = [
 def register():
     """Register panel."""
     for cls in classes:
-        bpy.utils.register_class(cls)
+        try:
+            bpy.utils.register_class(cls)
+        except ValueError:
+            bpy.utils.unregister_class(cls)
+            bpy.utils.register_class(cls)
 
 
 def unregister():

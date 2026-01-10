@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import bpy
-from bpy.types import Operator
+from bpy.types import Context, Operator
 
 from ..properties.link_props import sanitize_urdf_name
 
@@ -17,7 +17,7 @@ class LINKFORGE_OT_create_transmission(Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context: Context):
         """Check if operator can run."""
         obj = context.active_object
         if obj is None:
@@ -28,7 +28,7 @@ class LINKFORGE_OT_create_transmission(Operator):
         # Require a joint to be selected
         return obj.type == "EMPTY" and obj.linkforge_joint.is_robot_joint
 
-    def execute(self, context):
+    def execute(self, context: Context):
         """Execute the operator."""
         obj = context.active_object
 
@@ -131,7 +131,7 @@ class LINKFORGE_OT_delete_transmission(Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context: Context):
         """Check if operator can run."""
         obj = context.active_object
         if obj is None:
@@ -153,16 +153,29 @@ class LINKFORGE_OT_delete_transmission(Operator):
 
 
 # Registration
+classes = [
+    LINKFORGE_OT_create_transmission,
+    LINKFORGE_OT_delete_transmission,
+]
+
+
 def register():
     """Register operators."""
-    bpy.utils.register_class(LINKFORGE_OT_create_transmission)
-    bpy.utils.register_class(LINKFORGE_OT_delete_transmission)
+    for cls in classes:
+        try:
+            bpy.utils.register_class(cls)
+        except ValueError:
+            bpy.utils.unregister_class(cls)
+            bpy.utils.register_class(cls)
 
 
 def unregister():
     """Unregister operators."""
-    bpy.utils.unregister_class(LINKFORGE_OT_delete_transmission)
-    bpy.utils.unregister_class(LINKFORGE_OT_create_transmission)
+    for cls in reversed(classes):
+        try:
+            bpy.utils.unregister_class(cls)
+        except RuntimeError:
+            pass
 
 
 if __name__ == "__main__":

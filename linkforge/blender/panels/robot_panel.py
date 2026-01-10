@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import bpy
-from bpy.types import Operator, Panel
+from bpy.types import Context, Operator, Panel
 
 
 def build_tree_structure(scene):
@@ -95,7 +95,7 @@ class LINKFORGE_PT_validate_export(Panel):
     bl_order = 3
     bl_options = {"DEFAULT_CLOSED"}
 
-    def draw(self, context):
+    def draw(self, context: Context):
         """Draw the panel."""
         layout = self.layout
         scene = context.scene
@@ -443,21 +443,21 @@ classes = [
 
 def register():
     """Register panel."""
-    bpy.utils.register_class(LINKFORGE_OT_select_tree_object)
-    bpy.utils.register_class(LINKFORGE_PT_validate_export)
+    for cls in classes:
+        try:
+            bpy.utils.register_class(cls)
+        except ValueError:
+            bpy.utils.unregister_class(cls)
+            bpy.utils.register_class(cls)
 
 
 def unregister():
     """Unregister panel."""
-    try:
-        bpy.utils.unregister_class(LINKFORGE_PT_validate_export)
-    except RuntimeError:
-        pass
-
-    try:
-        bpy.utils.unregister_class(LINKFORGE_OT_select_tree_object)
-    except RuntimeError:
-        pass
+    for cls in reversed(classes):
+        try:
+            bpy.utils.unregister_class(cls)
+        except RuntimeError:
+            pass
 
 
 if __name__ == "__main__":

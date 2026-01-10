@@ -11,8 +11,9 @@ import traceback
 from contextlib import contextmanager
 from pathlib import Path
 
+import bpy
 from bpy.props import StringProperty
-from bpy.types import Operator
+from bpy.types import Context, Operator
 from bpy_extras.io_utils import ImportHelper
 
 from ...core.logging_config import get_logger
@@ -45,7 +46,7 @@ class LINKFORGE_OT_import_urdf(Operator, ImportHelper):
         options={"HIDDEN"},
     )
 
-    def execute(self, context):
+    def execute(self, context: Context):
         """Execute the import."""
         from ...core.parsers.urdf_parser import parse_urdf, parse_urdf_string
         from ..utils.urdf_importer import import_robot_to_scene
@@ -175,13 +176,20 @@ classes = [
 def register():
     """Register operators."""
     for cls in classes:
-        bpy.utils.register_class(cls)
+        try:
+            bpy.utils.register_class(cls)
+        except ValueError:
+            bpy.utils.unregister_class(cls)
+            bpy.utils.register_class(cls)
 
 
 def unregister():
     """Unregister operators."""
     for cls in reversed(classes):
-        bpy.utils.unregister_class(cls)
+        try:
+            bpy.utils.unregister_class(cls)
+        except RuntimeError:
+            pass
 
 
 if __name__ == "__main__":

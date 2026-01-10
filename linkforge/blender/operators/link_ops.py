@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import bpy
 import mathutils
-from bpy.types import Operator
+from bpy.types import Context, Operator
 
 from ...core.logging_config import get_logger
 from ..properties.link_props import sanitize_urdf_name
@@ -520,7 +520,7 @@ class LINKFORGE_OT_create_link_from_mesh(Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context: Context):
         """Check if operator can run."""
         obj = context.active_object
         if obj is None:
@@ -546,7 +546,7 @@ class LINKFORGE_OT_create_link_from_mesh(Operator):
 
         return True
 
-    def execute(self, context):
+    def execute(self, context: Context):
         """Execute the operator."""
         mesh_obj = context.active_object
         original_name = mesh_obj.name
@@ -647,7 +647,7 @@ class LINKFORGE_OT_generate_collision(Operator):
     )
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context: Context):
         """Check if operator can run."""
         obj = context.active_object
         if obj is None:
@@ -669,7 +669,7 @@ class LINKFORGE_OT_generate_collision(Operator):
 
         return False
 
-    def execute(self, context):
+    def execute(self, context: Context):
         """Execute the operator."""
         obj = context.active_object
 
@@ -716,7 +716,7 @@ class LINKFORGE_OT_generate_collision_all(Operator):
     bl_description = "Generate collision geometry for all robot links in the scene"
     bl_options = {"REGISTER", "UNDO"}
 
-    def execute(self, context):
+    def execute(self, context: Context):
         """Execute the operator."""
         count = 0
         failed = 0
@@ -759,7 +759,7 @@ class LINKFORGE_OT_toggle_collision_visibility(Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context: Context):
         """Check if operator can run."""
         obj = context.active_object
         if obj is None:
@@ -782,7 +782,7 @@ class LINKFORGE_OT_toggle_collision_visibility(Operator):
 
         return False
 
-    def execute(self, context):
+    def execute(self, context: Context):
         """Execute the operator."""
         obj = context.active_object
 
@@ -818,7 +818,7 @@ class LINKFORGE_OT_calculate_inertia(Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context: Context):
         """Check if operator can run."""
         obj = context.active_object
         if obj is None:
@@ -833,7 +833,7 @@ class LINKFORGE_OT_calculate_inertia(Operator):
 
         return obj.linkforge.is_robot_link
 
-    def execute(self, context):
+    def execute(self, context: Context):
         """Execute the operator."""
         obj = context.active_object
 
@@ -858,7 +858,7 @@ class LINKFORGE_OT_calculate_inertia_all(Operator):
     bl_description = "Auto-calculate inertia tensor for all robot links in the scene"
     bl_options = {"REGISTER", "UNDO"}
 
-    def execute(self, context):
+    def execute(self, context: Context):
         """Execute the operator."""
         count = 0
         failed = 0
@@ -918,7 +918,7 @@ class LINKFORGE_OT_remove_link(Operator):
 
         return False
 
-    def execute(self, context):
+    def execute(self, context: Context):
         """Execute the operator."""
         obj = context.active_object
 
@@ -1054,13 +1054,20 @@ classes = [
 def register():
     """Register operators."""
     for cls in classes:
-        bpy.utils.register_class(cls)
+        try:
+            bpy.utils.register_class(cls)
+        except ValueError:
+            bpy.utils.unregister_class(cls)
+            bpy.utils.register_class(cls)
 
 
 def unregister():
     """Unregister operators."""
     for cls in reversed(classes):
-        bpy.utils.unregister_class(cls)
+        try:
+            bpy.utils.unregister_class(cls)
+        except RuntimeError:
+            pass
 
 
 if __name__ == "__main__":

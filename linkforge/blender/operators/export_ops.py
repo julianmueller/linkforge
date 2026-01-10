@@ -12,7 +12,7 @@ from pathlib import Path
 
 import bpy
 from bpy.props import StringProperty
-from bpy.types import Operator
+from bpy.types import Context, Event, Operator
 from bpy_extras.io_utils import ExportHelper
 
 from ...core.logging_config import get_logger
@@ -45,7 +45,7 @@ class LINKFORGE_OT_export_urdf(Operator, ExportHelper):
         options={"HIDDEN"},
     )
 
-    def invoke(self, context, event):
+    def invoke(self, context: Context, event: Event):
         """Invoked before the file browser opens."""
         # Update file extension based on export format
         robot_props = context.scene.linkforge
@@ -57,7 +57,7 @@ class LINKFORGE_OT_export_urdf(Operator, ExportHelper):
         # Call parent invoke to open file browser
         return ExportHelper.invoke(self, context, event)
 
-    def execute(self, context):
+    def execute(self, context: Context):
         """Execute the export."""
         # Import here to avoid circular dependencies
         from ...core.generators import URDFGenerator, XACROGenerator
@@ -171,7 +171,7 @@ class LINKFORGE_OT_validate_robot(Operator):
     bl_label = "Validate Robot"
     bl_description = "Validate the robot structure for errors"
 
-    def execute(self, context):
+    def execute(self, context: Context):
         """Execute validation."""
         from ...core.validation import RobotValidator
         from ..utils.converters import scene_to_robot
@@ -273,13 +273,20 @@ classes = [
 def register():
     """Register operators."""
     for cls in classes:
-        bpy.utils.register_class(cls)
+        try:
+            bpy.utils.register_class(cls)
+        except ValueError:
+            bpy.utils.unregister_class(cls)
+            bpy.utils.register_class(cls)
 
 
 def unregister():
     """Unregister operators."""
     for cls in reversed(classes):
-        bpy.utils.unregister_class(cls)
+        try:
+            bpy.utils.unregister_class(cls)
+        except RuntimeError:
+            pass
 
 
 if __name__ == "__main__":

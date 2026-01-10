@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import bpy
-from bpy.types import Operator
+from bpy.types import Context, Operator
 
 from ..properties.link_props import sanitize_urdf_name
 
@@ -17,7 +17,7 @@ class LINKFORGE_OT_create_joint(Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context: Context):
         """Check if operator can run."""
         obj = context.active_object
         if obj is None:
@@ -32,7 +32,7 @@ class LINKFORGE_OT_create_joint(Operator):
             obj.parent and hasattr(obj.parent, "linkforge") and obj.parent.linkforge.is_robot_link
         )
 
-    def execute(self, context):
+    def execute(self, context: Context):
         """Execute the operator."""
         obj = context.active_object
 
@@ -106,7 +106,7 @@ class LINKFORGE_OT_delete_joint(Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context: Context):
         """Check if operator can run."""
         obj = context.active_object
         if obj is None:
@@ -115,7 +115,7 @@ class LINKFORGE_OT_delete_joint(Operator):
             return False
         return obj.type == "EMPTY" and obj.linkforge_joint.is_robot_joint
 
-    def execute(self, context):
+    def execute(self, context: Context):
         """Execute the operator."""
         obj = context.active_object
         joint_name = obj.name
@@ -201,13 +201,20 @@ classes = [
 def register():
     """Register operators."""
     for cls in classes:
-        bpy.utils.register_class(cls)
+        try:
+            bpy.utils.register_class(cls)
+        except ValueError:
+            bpy.utils.unregister_class(cls)
+            bpy.utils.register_class(cls)
 
 
 def unregister():
     """Unregister operators."""
     for cls in reversed(classes):
-        bpy.utils.unregister_class(cls)
+        try:
+            bpy.utils.unregister_class(cls)
+        except RuntimeError:
+            pass
 
 
 if __name__ == "__main__":

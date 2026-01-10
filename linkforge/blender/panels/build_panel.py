@@ -7,7 +7,7 @@ It must be registered BEFORE any child panels.
 from __future__ import annotations
 
 import bpy
-from bpy.types import Panel
+from bpy.types import Context, Panel
 
 
 class LINKFORGE_PT_build(Panel):
@@ -21,7 +21,7 @@ class LINKFORGE_PT_build(Panel):
     bl_category = "LinkForge"
     bl_order = 0
 
-    def draw(self, context):
+    def draw(self, context: Context):
         """Draw the panel."""
         layout = self.layout
 
@@ -34,17 +34,29 @@ class LINKFORGE_PT_build(Panel):
         layout.label(text="Create robot structure:", icon="TOOL_SETTINGS")
 
 
+# Registration
+classes = [
+    LINKFORGE_PT_build,
+]
+
+
 def register():
     """Register panel."""
-    bpy.utils.register_class(LINKFORGE_PT_build)
+    for cls in classes:
+        try:
+            bpy.utils.register_class(cls)
+        except ValueError:
+            bpy.utils.unregister_class(cls)
+            bpy.utils.register_class(cls)
 
 
 def unregister():
     """Unregister panel."""
-    try:
-        bpy.utils.unregister_class(LINKFORGE_PT_build)
-    except RuntimeError:
-        pass
+    for cls in reversed(classes):
+        try:
+            bpy.utils.unregister_class(cls)
+        except RuntimeError:
+            pass
 
 
 if __name__ == "__main__":

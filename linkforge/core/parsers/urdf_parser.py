@@ -1234,10 +1234,9 @@ def _detect_xacro_file(root: ET.Element, filepath: Path) -> None:
             "This parser handles URDF files only. For XACRO files, use the 'Import Robot' "
             "operator in Blender which automatically converts XACRO to URDF.\n\n"
             "If using this parser programmatically, convert XACRO to URDF first:\n"
-            "  1. Use parse_urdf_string() with xacrodoc:\n"
-            "     from xacrodoc import XacroDoc\n"
-            "     doc = XacroDoc.from_file('{filepath.name}')\n"
-            "     robot = parse_urdf_string(doc.to_urdf_string())\n\n"
+            "   from xacrodoc import XacroDoc\n"
+            "   doc = XacroDoc.from_file('{filepath.name}')\n"
+            "   robot = parse_urdf_string(doc.to_urdf_string())\n"
         )
 
         if xacro_elements:

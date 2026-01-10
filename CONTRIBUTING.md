@@ -339,13 +339,9 @@ Pre-commit automatically runs on `git commit`:
    - Fill out the PR template
    - Link any related issues
 
-3. **PR Checklist**
-   - [ ] PR title follows **Conventional Commits** (e.g. `feat: ...`, `fix: ...`)
-   - [ ] Tests pass (`uv run pytest`)
-   - [ ] Linting passes (`uv run ruff check linkforge/`)
-   - [ ] Code is formatted (`uv run ruff format linkforge/`)
-   - [ ] Documentation updated (if needed)
-   - [ ] Extension builds (`python3 build_extension.py`)
+3. **Check Pull Request Status**
+   - Ensure the CI pipeline passes (GitHub Actions).
+   - Once you create the PR, follow the automated checklist provided in the PR description template. This ensures all standards (tests, linting, quality) are met before maintainer review.
 
 4. **Code Review**
    - Address review comments
@@ -370,7 +366,7 @@ Use conventional commits:
 LinkForge uses **Release Please** to automate versioning and changelogs.
 
 1. **Automation**: When code is merged into `main`, Release Please will automatically create (or update) a "Release PR".
-2. **Versioning**: This PR will contain a version bump in `blender_manifest.toml` and an updated `CHANGELOG.md` based on your commit messages.
+2. **Versioning**: This PR will contain a version bump in `blender_manifest.toml`, `CITATION.cff`, and an updated `CHANGELOG.md` based on your commit messages.
 3. **Merging**: Once a maintainer merges this Release PR, a GitHub Tag and Release are automatically created.
 4. **Distribution**: The `release.yml` workflow will then build the extension `.zip` and attach it to the GitHub Release.
 
@@ -437,12 +433,23 @@ import subprocess
 subprocess.run(["pytest", "tests/integration/"])
 ```
 
-## Maintenance Notes
+## Technical Considerations
 
-### `ros2_control` Support
-Supporting `ros2_control` requires vigilance as the API evolves with each ROS distribution (Humble, Rolling, Jazzy, etc.).
-*   **When editing generators**: Always verify the exported syntax against the latest official `ros2_control` demos.
-*   **Breaking Changes**: If a new ROS version breaks our export, creating a fix takes priority.
+To maintain LinkForge's status as a professional-grade tool, we prioritize stability in three key areas:
+
+### 1. The Blender Bridge (Foundation)
+LinkForge must remain compatible with the latest Blender LTS (Long Term Support) and the current stable release.
+- **Vigilance**: When a new Blender version (e.g., 5.0) enters Beta, we prioritize testing our `export_ops.py` to ensure no API breaking changes affect our users.
+
+### 2. URDF/XACRO Fidelity (Core)
+Our primary goal is 100% compliance with official specifications.
+- **Cross-Simulator Support**: We ensure that generated files work seamlessly across Gazebo (Classic & Sim), Webots, Isaac Sim, and MuJoCo.
+- **Precision**: Physics calculations (inertia tensors) must remain scientifically accurate, as they are the "brain" of the exported robot.
+
+### 3. The ROS 2 Ecosystem (Integration)
+While LinkForge supports `ros2_control`, it is designed to be distribution-agnostic where possible.
+- **Compatibility**: We target compatibility with active ROS 2 LTS distributions (like Humble and Jazzy) and Rolling.
+- **Maintenance**: If the official `ros2_control` XML syntax changes in a newer ROS version, we update our generators to support those changes while maintaining backward compatibility.
 
 ## Getting Help
 
@@ -452,9 +459,12 @@ Supporting `ros2_control` requires vigilance as the API evolves with each ROS di
 
 ## Recognition
 
-Contributors are recognized in:
-- CHANGELOG.md
+We value every contribution, big or small. Contributors are recognized in:
+- `CHANGELOG.md`
 - GitHub contributors page
 - Release notes
+
+### Academic Recognition
+For significant core contributions (new sensor systems, physics engine refinements, major architectural changes), we may invite you to be listed as a co-author in the `CITATION.cff` file and the official documentation, ensuring your work is properly attributed in academic research using LinkForge.
 
 Thank you for contributing to LinkForge! 🚀

@@ -182,7 +182,7 @@ LinkForge uses a "Self-Contained" bundling strategy for wheels. To update or add
 - [x] **v1.1.0**: Enhanced Documentation, Workflow Polish, & Bug Fixes.
 - [ ] **v1.2.0**: **MJCF (MuJoCo) Export Support** (High demand for RL).
 - [ ] **v1.3.0**: **Kinematic Validation** (MoveIt style checks).
-- [ ] **v2.0.0**: **Omniverse / USD Bridge** (For Isaac Sim).
+
 
 ## 🔮 Our Transparency Commitment
 

@@ -811,6 +811,7 @@ def parse_sensor_from_gazebo(gazebo_elem: ET.Element) -> Sensor | None:
     type_map = {
         "camera": SensorType.CAMERA,
         "depth": SensorType.DEPTH_CAMERA,
+        "depth_camera": SensorType.DEPTH_CAMERA,  # Standard Gazebo depth camera
         "multicamera": SensorType.CAMERA,
         "ray": SensorType.LIDAR,
         "lidar": SensorType.LIDAR,  # Modern Gazebo uses "lidar" instead of "ray"
@@ -818,6 +819,7 @@ def parse_sensor_from_gazebo(gazebo_elem: ET.Element) -> Sensor | None:
         "gpu_lidar": SensorType.LIDAR,  # Normalize GPU lidar to internal LIDAR type
         "imu": SensorType.IMU,
         "gps": SensorType.GPS,
+        "navsat": SensorType.GPS,  # Gazebo Sim uses navsat for GPS
         "contact": SensorType.CONTACT,
         "force_torque": SensorType.FORCE_TORQUE,
     }

@@ -138,13 +138,24 @@ class LINKFORGE_PT_links(Panel):
             row = box.row()
             icon = "INFO"
             icon = "MESH_ICOSPHERE" if is_primitive else "OUTLINER_DATA_MESH"
+        if collision_obj:
+            row = box.row()
+            icon = "INFO"
+            icon = "MESH_ICOSPHERE" if is_primitive else "OUTLINER_DATA_MESH"
             row.label(text=f"Detected Collision: {detected_type}", icon=icon)
 
-        # Show slider for meshes (only relevant for non-primitives)
-        if collision_obj and detected_type == "CONVEX_HULL":
-            box.separator()
-            row = box.row()
-            row.prop(props, "collision_quality", text="Collision Quality", slider=True)
+            is_imported = collision_obj.get("imported_from_urdf")
+
+            # Show slider for meshes (only relevant for non-primitives)
+            if detected_type == "CONVEX_HULL":
+                box.separator()
+                row = box.row()
+                # Disable slider if imported from URDF (cannot be simplified via slider)
+                row.enabled = not is_imported
+                row.prop(props, "collision_quality", text="Collision Quality", slider=True)
+
+            if is_imported:
+                box.label(text="Imported collision: Geometry preserved", icon="LOCKED")
 
         # Collision actions (after quality setting for logical workflow)
         col = box.column(align=True)

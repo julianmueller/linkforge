@@ -8,7 +8,7 @@ This document provides a technical specification of how LinkForge maps Blender o
 | :--- | :--- | :--- | :--- |
 | **Link** | `Empty` | Plain Axes | The coordinate frame of the link. |
 | **Visual** | `Mesh` | Textured/Solid | Must be a child of a Link Empty. |
-| **Collision** | `Mesh` | Wireframe | Must be a child of a Link Empty. LinkForge merges multiple visual children into a single convex hull by default. |
+| **Collision** | `Mesh` | Wireframe | Child of Link Empty. Merged into single convex hull. |
 | **Joint** | `Empty` | Arrows | Colored axes (RGB for XYZ). |
 | **Sensor** | `Empty` | Sphere | Wireframe sphere. Must be a child of a Link Empty. |
 
@@ -27,6 +27,12 @@ During export, all object names are sanitized to remain compliant with the URDF 
 1.  **Spaces** are replaced with underscores `_`.
 2.  **Special characters** (except underscores and hyphens) are removed.
 3.  **Leading numbers** are prefixed with `_` or `link_`.
+
+### Duplicate Name Resolution (Import)
+When importing URDFs, LinkForge enforces unique names for all links and joints. If duplicates are found in the source file:
+-   **Links**: Automatically renamed with a numeric suffix (e.g., `base_link_duplicate_1`).
+-   **Joints**: Automatically renamed with a numeric suffix (e.g., `joint_duplicate_1`).
+-   **Warnings**: All renames are logged to the console, allowing you to identify and fix the source URDF if needed.
 
 ## Hierarchy Rules
 
@@ -62,9 +68,10 @@ When working with imported robots, LinkForge displays status labels on the Link 
 ## Property Storage
 LinkForge stores all metadata as **Custom Properties** on the Blender objects. These can be inspected in the "Custom Properties" panel of the Object Data tab, though it is recommended to use the LinkForge Sidebar for editing.
 
-| Component | Property Prefix |
+| Component | Property Location |
 | :--- | :--- |
-| **Link** | `linkforge.*` |
-| **Joint** | `linkforge_joint.*` |
-| **Control** | `linkforge_control.*` |
-| **Sensor** | `linkforge_sensor.*` |
+| **Link** | `Object.linkforge.*` |
+| **Joint** | `Object.linkforge_joint.*` |
+| **Sensor** | `Object.linkforge_sensor.*` |
+| **Robot** | `Scene.linkforge.*` |
+| **ROS2 Control** | `Scene.linkforge.ros2_control_joints` |

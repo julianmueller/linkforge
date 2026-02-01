@@ -15,7 +15,10 @@ logger = get_logger(__name__)
 
 
 def validate_mesh_path(
-    mesh_filepath: Path, urdf_directory: Path, allow_absolute: bool = False
+    mesh_filepath: Path,
+    urdf_directory: Path,
+    allow_absolute: bool = False,
+    sandbox_root: Path | None = None,
 ) -> Path:
     """Validate that a mesh file path is safe to access.
 
@@ -29,6 +32,8 @@ def validate_mesh_path(
         mesh_filepath: The mesh file path from the URDF (may be relative or absolute)
         urdf_directory: The directory containing the URDF file
         allow_absolute: If True, allows absolute paths (default: False for security)
+        sandbox_root: The root directory for the sandbox. If None, urdf_directory is used.
+                      Access is restricted to files within this root and its subdirectories.
 
     Returns:
         The validated absolute path to the mesh file
@@ -55,6 +60,12 @@ def validate_mesh_path(
         >>> # Absolute path (allowed explicitly)
         >>> validate_mesh_path(Path("/shared/meshes/arm.stl"), urdf_dir, allow_absolute=True)
         PosixPath('/shared/meshes/arm.stl')
+
+        >>> # Sibling folder support
+        >>> root_dir = Path("/home/user/package")
+        >>> urdf_dir = root_dir / "urdf"
+        >>> validate_mesh_path(Path("../meshes/arm.stl"), urdf_dir, sandbox_root=root_dir)
+        PosixPath('/home/user/package/meshes/arm.stl')
     """
     # Decode URL encoding to catch encoded path traversal attempts (e.g., %2e%2e%2f -> ../)
     mesh_str = str(mesh_filepath)
@@ -88,6 +99,20 @@ def validate_mesh_path(
             f"Mesh path '{mesh_filepath}' resolves to a restricted system location: {resolved}. "
             "This is not allowed for security reasons."
         )
+
+    # Sandbox validation: ensure resolved path is within sandbox_root
+    check_root = (sandbox_root or urdf_directory).resolve()
+    try:
+        resolved.relative_to(check_root)
+    except ValueError:
+        logger.warning(
+            f"SECURITY: Path traversal attempt - '{mesh_filepath}' "
+            f"attempts to escape sandbox root: {check_root}"
+        )
+        raise ValueError(
+            f"Mesh path '{mesh_filepath}' attempts to escape the sandbox root: {check_root}. "
+            "This is not allowed for security reasons."
+        ) from None
 
     return resolved
 
@@ -193,3 +218,35 @@ def validate_package_uri(uri: str) -> str:
         )
 
     return uri
+
+
+def find_sandbox_root(filepath: Path) -> Path:
+    """Find a sensible sandbox root for a given file.
+
+    For robotics projects, this frequently means going up one level if the file
+    is inside a folder named 'urdf' or 'xacro', or searching for a package.xml.
+
+    Args:
+        filepath: Path to the URDF or XACRO file
+
+    Returns:
+        The detected sandbox root Path
+    """
+    path = filepath.resolve()
+    current = path.parent
+
+    # 1. If direct parent is 'urdf' or 'xacro', the package root is likely one level up
+    if current.name.lower() in ("urdf", "xacro"):
+        return current.parent
+
+    # 2. Search upwards for a ROS package.xml (up to 5 levels)
+    check_path = current
+    for _ in range(5):
+        if (check_path / "package.xml").exists():
+            return check_path
+        if check_path.parent == check_path:  # Reached root
+            break
+        check_path = check_path.parent
+
+    # 3. Default to the directory containing the file
+    return current

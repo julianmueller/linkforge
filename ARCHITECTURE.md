@@ -41,6 +41,7 @@ graph TB
     Models --> CoreUtils
     Parsers --> CoreUtils
     Generators --> CoreUtils
+    Parsers --> Validation
     Physics --> Models
     Validation --> Models
 
@@ -94,9 +95,9 @@ graph LR
 |--------|---------|-----------|
 | **Panels** | UI layout and display | `robot_panel.py`, `joint_panel.py`, `link_panel.py`, `sensor_panel.py`, `control_panel.py`, `forge_panel.py` |
 | **Operators** | User actions (import, export, etc.) | `import_ops.py`, `export_ops.py`, `link_ops.py`, `joint_ops.py`, `sensor_ops.py`, `control_ops.py`, `transmission_ops.py` (Legacy) |
-| **Properties** | Blender scene data storage | `robot_props.py`, `joint_props.py`, `link_props.py`, `sensor_props.py`, `control_props.py`, `transmission_props.py` (Legacy) |
+| **Properties** | Blender scene data storage | `robot_props.py`, `joint_props.py`, `link_props.py`, `sensor_props.py`, `control_props.py`, `validation_props.py`, `transmission_props.py` (Legacy) |
 | **Adapters** | Conversion between Blender ↔ Core | `converters.py`, `scene_builder.py`, `mesh_export.py` |
-| **Utils** | Blender-specific helpers | `joint_gizmos.py`, `property_helpers.py`, `transform_utils.py` |
+| **Utils** | Blender-specific helpers | `joint_gizmos.py`, `inertia_gizmos.py`, `property_helpers.py`, `transform_utils.py`, `scene_utils.py`, `joint_utils.py`, `decorators.py` |
 
 ### 2. Core Logic Layer (`core/src/linkforge_core/`)
 
@@ -136,7 +137,7 @@ graph TB
 | **Generators** | Python objects → URDF/XACRO | `urdf_generator.py`, `xacro_generator.py` |
 | **Physics** | Mass & inertia calculations | `physics/inertia.py` |
 | **Validation** | Error checking & security | `validation/validator.py`, `validation/security.py` |
-| **Utils** | Unified internal logic | `utils/math_utils.py`, `utils/string_utils.py` |
+| **Utils** | Unified internal logic | `utils/math_utils.py`, `utils/string_utils.py`, `utils/xml_utils.py`, `utils/kinematics.py` |
 
 ## Data Flow
 
@@ -155,7 +156,8 @@ sequenceDiagram
     User->>UI: Select URDF file
     UI->>Op: Invoke Import
     Op->>Parser: parse_urdf(file)
-    Parser->>Parser: Validate XML
+    Parser->>Parser: Validate XML & Depth
+    Parser->>Parser: Resolve Duplicates (Robustness)
     Parser->>Models: Create Robot model
     Models->>Models: Validate structure
     Models-->>Parser: Robot object
@@ -207,7 +209,7 @@ classDiagram
         +list~Joint~ joints
         +list~Sensor~ sensors
         +list~Transmission~ transmissions
-        +Ros2Control ros2_control
+        +list~Ros2Control~ ros2_controls
         +validate_tree_structure()
         +add_link()
         +add_joint()
@@ -319,16 +321,11 @@ def __post_init__(self) -> None:
         raise ValueError("Mass must be positive")
 ```
 
-### 3. **Resilient Parsing**
-Parser logs warnings and continues instead of crashing on minor issues.
-
-```python
-try:
-    geometry = parse_box(elem)
-except ValueError as e:
-    logger.warning(f"Invalid geometry: {e}")
-    return None  # Skip invalid element
-```
+### 3. **Resilient Parsing & Duplicate Resolution**
+Parser logic is designed to be highly resilient to malformed or non-compliant URDFs.
+- **Graceful Failure**: Individual invalid elements (e.g., malformed joints) are skipped with warnings rather than halting the process.
+- **Duplicate Resolution**: If duplicate link or joint names are detected, LinkForge automatically renames them (e.g., `link_duplicate_1`) to preserve kinematic integrity while maintaining compliance with Blender/Core unique naming requirements.
+- **Broken Reference Handling**: Joints with missing parent/child links are skipped with warnings to prevent broken data structures.
 
 ### 4. **O(1) Lookups**
 Robot model maintains internal indices for fast access.
@@ -347,7 +344,7 @@ class Robot:
 1. Add enum to `SensorType` in `models/sensor.py`
 2. Create info dataclass (e.g., `MyNewSensorInfo`)
 3. Add parsing logic in `parsers/urdf_parser.py`
-4. Add generation logic in `generators/urdf.py`
+4. Add generation logic in `urdf_generator.py`
 5. Add Blender UI in `panels/sensor_panel.py`
 
 ### Adding New Joint Types
@@ -355,7 +352,7 @@ class Robot:
 1. Add enum to `JointType` in `models/joint.py`
 2. Update validation in `Joint.__post_init__()`
 3. Update parser in `parsers/urdf_parser.py`
-4. Update generator in `generators/urdf.py`
+4. Update generator in `urdf_generator.py`
 5. Add gizmo visualization in `utils/joint_gizmos.py`
 
 ## Performance Considerations
@@ -411,9 +408,10 @@ graph TB
    - String sanitization (prevent injection)
 
 2. **Path Security**
-   - Mesh path validation (prevent traversal)
+   - Mesh path validation (prevent traversal outside Sandbox Root)
+   - Sandbox Root Auto-Detection (allows sibling folders)
    - Package URI validation
-   - Whitelist-based approach
+   - Strict Whitelist-based approach
 
 3. **Resource Limits**
    - Max file size: 100 MB

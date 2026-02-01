@@ -93,13 +93,14 @@ def parse_origin(elem: ET.Element | None) -> Transform:
 
 
 def parse_geometry(
-    geom_elem: ET.Element, urdf_directory: Path | None = None
+    geom_elem: ET.Element, urdf_directory: Path | None = None, sandbox_root: Path | None = None
 ) -> Box | Cylinder | Sphere | Mesh | None:
     """Parse geometry element with security validation for mesh paths.
 
     Args:
         geom_elem: XML element containing geometry definition
         urdf_directory: Directory containing the URDF file (required for mesh path validation)
+        sandbox_root: Root directory for the sandbox (optional)
 
     Returns:
         Geometry object (Box, Cylinder, Sphere, or Mesh) or None if no valid geometry
@@ -179,12 +180,13 @@ def parse_geometry(
                 filename = filename[7:]
                 mesh_path = Path(filename)
 
-                # If path is absolute, it might be outside URDF directory
-                # If relative, it will be resolved relative to URDF directory
-                if urdf_directory is not None and not mesh_path.is_absolute():
+                if urdf_directory is not None:
                     # Validate that mesh path doesn't escape URDF directory
+                    # Note: We now also validate absolute paths if urdf_directory is provided
                     try:
-                        mesh_path = validate_mesh_path(mesh_path, urdf_directory)
+                        mesh_path = validate_mesh_path(
+                            mesh_path, urdf_directory, sandbox_root=sandbox_root
+                        )
                     except ValueError as e:
                         # Re-raise with more context
                         raise ValueError(f"Mesh path validation failed: {e}") from e
@@ -194,7 +196,9 @@ def parse_geometry(
                 if urdf_directory is not None:
                     # Validate that mesh path doesn't escape URDF directory
                     try:
-                        mesh_path = validate_mesh_path(mesh_path, urdf_directory)
+                        mesh_path = validate_mesh_path(
+                            mesh_path, urdf_directory, sandbox_root=sandbox_root
+                        )
                     except ValueError as e:
                         # Re-raise with more context
                         raise ValueError(f"Mesh path validation failed: {e}") from e
@@ -229,23 +233,27 @@ def parse_material(mat_elem: ET.Element | None, materials: dict[str, Material]) 
         rgba_text = color_elem.get("rgba", "0.8 0.8 0.8 1.0")
         parts = rgba_text.strip().split()
 
-        # Validate RGBA array bounds
-        if len(parts) < 3:
-            raise ValueError(
-                f"Invalid RGBA color format: expected at least 3 components (R G B), got {len(parts)}"
-            )
-        if len(parts) > 4:
-            raise ValueError(
-                f"Invalid RGBA color format: expected at most 4 components (R G B A), got {len(parts)}"
-            )
+        try:
+            # Validate RGBA array bounds
+            if len(parts) < 3:
+                raise ValueError(
+                    f"Invalid RGBA color format: expected at least 3 components (R G B), got {len(parts)}"
+                )
+            if len(parts) > 4:
+                raise ValueError(
+                    f"Invalid RGBA color format: expected at most 4 components (R G B A), got {len(parts)}"
+                )
 
-        # Parse with bounds checking (Color validates 0-1 range)
-        color = Color(
-            r=float(parts[0]),
-            g=float(parts[1]),
-            b=float(parts[2]),
-            a=float(parts[3]) if len(parts) > 3 else 1.0,
-        )
+            # Parse with bounds checking (Color validates 0-1 range)
+            color = Color(
+                r=float(parts[0]),
+                g=float(parts[1]),
+                b=float(parts[2]),
+                a=float(parts[3]) if len(parts) > 3 else 1.0,
+            )
+        except (ValueError, TypeError, IndexError) as e:
+            logger.warning(f"Invalid material color ignored: {e}")
+            return None
 
     # Parse texture
     texture = None
@@ -260,7 +268,10 @@ def parse_material(mat_elem: ET.Element | None, materials: dict[str, Material]) 
 
 
 def parse_link(
-    link_elem: ET.Element, materials: dict[str, Material], urdf_directory: Path | None = None
+    link_elem: ET.Element,
+    materials: dict[str, Material],
+    urdf_directory: Path | None = None,
+    sandbox_root: Path | None = None,
 ) -> Link:
     """Parse link element with support for multiple visual/collision elements.
 
@@ -268,6 +279,7 @@ def parse_link(
         link_elem: XML element containing link definition
         materials: Dictionary of global materials
         urdf_directory: Directory containing the URDF file (for mesh path validation)
+        sandbox_root: Root directory for the sandbox (optional)
 
     Returns:
         Link object with visuals, collisions, and inertial properties
@@ -279,7 +291,11 @@ def parse_link(
     for visual_elem in link_elem.findall("visual"):
         origin = parse_origin(visual_elem.find("origin"))
         geom_elem = visual_elem.find("geometry")
-        geometry = parse_geometry(geom_elem, urdf_directory) if geom_elem is not None else None
+        geometry = (
+            parse_geometry(geom_elem, urdf_directory, sandbox_root=sandbox_root)
+            if geom_elem is not None
+            else None
+        )
         material = parse_material(visual_elem.find("material"), materials)
         visual_name = visual_elem.get("name")  # Optional name attribute
 
@@ -293,7 +309,11 @@ def parse_link(
     for collision_elem in link_elem.findall("collision"):
         origin = parse_origin(collision_elem.find("origin"))
         geom_elem = collision_elem.find("geometry")
-        geometry = parse_geometry(geom_elem, urdf_directory) if geom_elem is not None else None
+        geometry = (
+            parse_geometry(geom_elem, urdf_directory, sandbox_root=sandbox_root)
+            if geom_elem is not None
+            else None
+        )
         collision_name = collision_elem.get("name")  # Optional name attribute
 
         if geometry:
@@ -475,81 +495,76 @@ def parse_transmission(trans_elem: ET.Element) -> Transmission:
     trans_type = trans_elem.findtext("type", "")
 
     # Parse joints
-    joints: list[TransmissionJoint] = []
-    for joint_elem in trans_elem.findall("joint"):
-        joint_name = joint_elem.get("name", "")
-
-        # Parse hardware interfaces
-        interfaces = []
-        for iface_elem in joint_elem.findall("hardwareInterface"):
-            raw_interface = iface_elem.text or "position"
-            interfaces.append(_normalize_hardware_interface(raw_interface))
-
-        if not interfaces:
-            interfaces = ["position"]  # Default
-
-        # Parse mechanical reduction (optional)
-        reduction = 1.0
-        reduction_elem = joint_elem.find("mechanicalReduction")
-        if reduction_elem is not None and reduction_elem.text:
-            reduction = float(reduction_elem.text)
-
-        # Parse offset (optional)
-        offset = 0.0
-        offset_elem = joint_elem.find("offset")
-        if offset_elem is not None and offset_elem.text:
-            offset = float(offset_elem.text)
-
-        joints.append(
-            TransmissionJoint(
-                name=joint_name,
-                hardware_interfaces=interfaces,
-                mechanical_reduction=reduction,
-                offset=offset,
-            )
+    joints = [
+        j
+        for j in (
+            _parse_transmission_component(joint_elem, TransmissionJoint)
+            for joint_elem in trans_elem.findall("joint")
         )
+        if j is not None
+    ]
 
     # Parse actuators
-    actuators: list[TransmissionActuator] = []
-    for actuator_elem in trans_elem.findall("actuator"):
-        actuator_name = actuator_elem.get("name", "")
+    actuators = [
+        a
+        for a in (
+            _parse_transmission_component(actuator_elem, TransmissionActuator)
+            for actuator_elem in trans_elem.findall("actuator")
+        )
+        if a is not None
+    ]
 
-        # Parse hardware interfaces
-        interfaces = []
-        for iface_elem in actuator_elem.findall("hardwareInterface"):
-            raw_interface = iface_elem.text or "position"
-            interfaces.append(_normalize_hardware_interface(raw_interface))
+    try:
+        return Transmission(
+            name=name,
+            type=trans_type,
+            joints=joints,
+            actuators=actuators,
+        )
+    except ValueError as e:
+        logger.warning(f"Invalid transmission '{name}' ignored: {e}")
+        return None
 
-        if not interfaces:
-            interfaces = ["position"]  # Default
 
-        # Parse mechanical reduction (optional)
-        reduction = 1.0
-        reduction_elem = actuator_elem.find("mechanicalReduction")
-        if reduction_elem is not None and reduction_elem.text:
+def _parse_transmission_component(
+    elem: ET.Element, cls: type[TransmissionJoint] | type[TransmissionActuator]
+) -> TransmissionJoint | TransmissionActuator:
+    """Helper to parse common transmission components (joints/actuators)."""
+    name = elem.get("name", "")
+
+    # Parse hardware interfaces
+    interfaces = []
+    for iface_elem in elem.findall("hardwareInterface"):
+        raw_interface = iface_elem.text or "position"
+        interfaces.append(_normalize_hardware_interface(raw_interface))
+
+    if not interfaces:
+        interfaces = ["position"]  # Default
+
+    # Parse mechanical reduction (optional)
+    reduction = 1.0
+    reduction_elem = elem.find("mechanicalReduction")
+    if reduction_elem is not None and reduction_elem.text:
+        with suppress(ValueError):
             reduction = float(reduction_elem.text)
 
-        # Parse offset (optional)
-        offset = 0.0
-        offset_elem = actuator_elem.find("offset")
-        if offset_elem is not None and offset_elem.text:
+    # Parse offset (optional)
+    offset = 0.0
+    offset_elem = elem.find("offset")
+    if offset_elem is not None and offset_elem.text:
+        with suppress(ValueError):
             offset = float(offset_elem.text)
 
-        actuators.append(
-            TransmissionActuator(
-                name=actuator_name,
-                hardware_interfaces=interfaces,
-                mechanical_reduction=reduction,
-                offset=offset,
-            )
+    try:
+        return cls(
+            name=name,
+            hardware_interfaces=interfaces,
+            mechanical_reduction=reduction,
+            offset=offset,
         )
-
-    return Transmission(
-        name=name,
-        type=trans_type,
-        joints=joints,
-        actuators=actuators,
-    )
+    except ValueError as e:
+        logger.warning(f"Invalid transmission component '{name}' ignored: {e}")
+        return None
 
 
 def parse_ros2_control(rc_elem: ET.Element) -> Ros2Control:
@@ -1037,7 +1052,7 @@ def parse_gazebo_element(gazebo_elem: ET.Element) -> GazeboElement:
     )
 
 
-def _detect_xacro_file(root: ET.Element, filepath: Path) -> None:
+def _detect_xacro_file(root: ET.Element, filepath: Path | None = None) -> None:
     """Detect if file is XACRO and raise helpful error.
 
     This function is called by parse_urdf() to prevent attempting to parse
@@ -1054,17 +1069,19 @@ def _detect_xacro_file(root: ET.Element, filepath: Path) -> None:
 
     """
     # Check for .xacro extension
-    is_xacro_extension = filepath.suffix.lower() in [".xacro", ".urdf.xacro"]
-
-    # Check file content for xmlns:xacro (ElementTree may not preserve it)
+    is_xacro_extension = False
     has_xacro_namespace = False
-    try:
-        content = filepath.read_text(encoding="utf-8")
-        has_xacro_namespace = "xmlns:xacro" in content
-    except (OSError, UnicodeDecodeError):
-        # If we can't read the file, assume no XACRO namespace
-        # (file may be binary, corrupted, or have permission issues)
-        pass
+
+    if filepath:
+        is_xacro_extension = filepath.suffix.lower() in [".xacro", ".urdf.xacro"]
+
+        # Check file content for xmlns:xacro (ElementTree may not preserve it)
+        try:
+            content = filepath.read_text(encoding="utf-8")
+            has_xacro_namespace = "xmlns:xacro" in content
+        except (OSError, UnicodeDecodeError):
+            # If we can't read the file, assume no XACRO namespace
+            pass
 
     # Check for xacro elements in root
     xacro_elements = []
@@ -1087,14 +1104,15 @@ def _detect_xacro_file(root: ET.Element, filepath: Path) -> None:
 
     # Raise error if XACRO features detected
     if is_xacro_extension or has_xacro_namespace or xacro_elements or has_substitutions:
+        filename = filepath.name if filepath else "URDF String"
         error_msg = (
-            f"XACRO file detected: {filepath.name}\n\n"
+            f"XACRO file detected: {filename}\n\n"
             "This parser handles URDF files only. For XACRO files, use the 'Import Robot' "
             "operator in Blender which automatically converts XACRO to URDF.\n\n"
             "If using this parser programmatically, convert XACRO to URDF first:\n"
             "   from linkforge_core.parsers import XacroResolver\n"
             f"   resolver = XacroResolver()\n"
-            "   robot = parse_urdf_string(resolver.resolve_file(filepath))\n"
+            "   robot = parse_urdf_string(resolver.resolve_file(filepath if filepath else '...'))\n"
         )
 
         if xacro_elements:
@@ -1106,13 +1124,17 @@ def _detect_xacro_file(root: ET.Element, filepath: Path) -> None:
 class URDFParser(RobotParser):
     """Refined URDF Parser using a class-based interface."""
 
-    def __init__(self, max_file_size: int = MAX_FILE_SIZE) -> None:
+    def __init__(
+        self, max_file_size: int = MAX_FILE_SIZE, sandbox_root: Path | None = None
+    ) -> None:
         """Initialize parser.
 
         Args:
             max_file_size: Maximum allowed file size in bytes (default: 100MB)
+            sandbox_root: Optional root directory for security sandbox
         """
         self.max_file_size = max_file_size
+        self.sandbox_root = sandbox_root
 
     def parse(self, filepath: Path, **kwargs: Any) -> Robot:
         """Parse URDF file into a Robot model using iterative parsing.
@@ -1168,16 +1190,20 @@ class URDFParser(RobotParser):
                                 materials[mat.name] = mat
 
                         elif elem.tag == "link":
-                            link = parse_link(elem, materials, filepath.parent)
-                            with suppress(ValueError):
-                                robot.add_link(link)
+                            # Use provided sandbox_root or default to filepath.parent
+                            parser_sandbox = kwargs.get("sandbox_root", self.sandbox_root)
+                            link = parse_link(
+                                elem, materials, filepath.parent, sandbox_root=parser_sandbox
+                            )
+                            self._add_link_robust(robot, link)
 
                         elif elem.tag == "joint":
-                            joint = parse_joint(elem)
                             try:
-                                robot.add_joint(joint)
+                                joint = parse_joint(elem)
+                                self._add_joint_robust(robot, joint, elem)
                             except ValueError as e:
-                                logger.warning(f"Skipping invalid joint '{joint.name}': {e}")
+                                joint_name = elem.get("name", "unnamed_joint")
+                                logger.warning(f"Skipping invalid joint '{joint_name}': {e}")
 
                         elif elem.tag == "transmission":
                             transmission = parse_transmission(elem)
@@ -1230,15 +1256,17 @@ class URDFParser(RobotParser):
                 f"(maximum {self.max_file_size / (1024 * 1024):.1f} MB)."
             )
 
-        try:
-            # Verify it's not a XACRO file with Xacro tags
-            if "xmlns:xacro" in urdf_string or "<xacro:" in urdf_string:
-                raise RobotParserError(
-                    "XACRO file detected in URDF string. Use the Blender XACRO resolver."
-                )
+        # Verify it's not a XACRO file with Xacro tags.
+        if "<xacro:" in urdf_string:
+            raise RobotParserError(
+                "XACRO features detected in URDF string. Use the Blender XACRO resolver."
+            )
 
+        try:
             root = ET.fromstring(urdf_string)
-            return self._parse_robot(root, filepath=urdf_directory)
+            _detect_xacro_file(root)
+            parser_sandbox = kwargs.get("sandbox_root", self.sandbox_root)
+            return self._parse_robot(root, filepath=urdf_directory, sandbox_root=parser_sandbox)
         except ET.ParseError as e:
             raise RobotParserError(f"Failed to parse URDF XML: {e}") from e
         except Exception as e:
@@ -1246,11 +1274,87 @@ class URDFParser(RobotParser):
                 raise
             raise RobotParserError(f"Unexpected error parsing URDF: {e}") from e
 
-    def _parse_robot(self, root: ET.Element, filepath: Path | None = None) -> Robot:
-        """Internal recursive parser for the robot element.
+    def _parse_global_materials(self, root: ET.Element) -> dict[str, Material]:
+        """Parse global material definitions from the root element."""
+        materials: dict[str, Material] = {}
+        for mat_elem in root.findall("material"):
+            mat = parse_material(mat_elem, materials)
+            if mat:
+                materials[mat.name] = mat
+        return materials
 
-        This method handles the complex internal logic of parsing robot elements,
-        including links, joints, materials, and Gazebo-specific tags.
+    def _add_link_robust(self, robot: Robot, link: Link) -> None:
+        """Add link to robot, renaming if duplicate exists."""
+        try:
+            robot.add_link(link)
+        except ValueError:
+            # Handle duplicate link names by renaming
+            original_name = link.name
+            counter = 1
+            while True:
+                new_name = f"{original_name}_duplicate_{counter}"
+                if new_name not in robot._link_index:
+                    link = replace(link, name=new_name)
+                    try:
+                        robot.add_link(link)
+                        logger.warning(f"Renamed duplicate link '{original_name}' to '{new_name}'")
+                        break
+                    except ValueError:
+                        counter += 1
+                else:
+                    counter += 1
+
+    def _add_joint_robust(self, robot: Robot, joint: Joint, joint_elem: ET.Element) -> None:
+        """Add joint to robot, renaming if duplicate exists and handling broken refs."""
+        try:
+            robot.add_joint(joint)
+        except ValueError as e:
+            # Get joint name from element if joint object creation failed
+            joint_name = joint_elem.get("name", "unnamed_joint")
+            if "already exists" in str(e):
+                # Handle duplicate joint name by renaming
+                original_name = joint_name
+                counter = 1
+                while True:
+                    new_name = f"{original_name}_duplicate_{counter}"
+                    if new_name not in robot._joint_index:
+                        joint = replace(joint, name=new_name)
+                        try:
+                            robot.add_joint(joint)
+                            logger.warning(
+                                f"Renamed duplicate joint '{original_name}' to '{new_name}'"
+                            )
+                            break
+                        except ValueError as inner_e:
+                            if "not found" in str(inner_e):
+                                # Also handle missing parent/child during rename attempt
+                                logger.warning(
+                                    f"Skipping duplicate joint '{original_name}' (renamed '{new_name}') "
+                                    f"due to broken reference: {inner_e}"
+                                )
+                                break
+                            counter += 1
+                    else:
+                        counter += 1
+            else:
+                # Handle other ValueErrors (missing parent/child links)
+                logger.warning(f"Skipping invalid joint '{joint_name}': {e}")
+
+    def _parse_robot(
+        self, root: ET.Element, filepath: Path | None = None, sandbox_root: Path | None = None
+    ) -> Robot:
+        """Parse robot elements into model.
+
+        This is used by parse_string() for smaller URDFs since it performs
+        a full ElementTree traversal.
+
+        Args:
+            root: XML root element
+            filepath: Original file directory for mesh resolution
+            sandbox_root: Root directory for security sandboxing
+
+        Returns:
+            Robot model
         """
         # Safety validation
         validate_xml_depth(root, 0)
@@ -1259,72 +1363,22 @@ class URDFParser(RobotParser):
             raise ValueError("Root element must be <robot>")
 
         robot = Robot(name=root.get("name", "unnamed_robot"))
-
-        # Parse global materials first
-        materials: dict[str, Material] = {}
-        for mat_elem in root.findall("material"):
-            mat = parse_material(mat_elem, materials)
-            if mat:
-                materials[mat.name] = mat
+        materials = self._parse_global_materials(root)
 
         # Parse all links first (joints need links to exist)
         for link_elem in root.findall("link"):
-            link = parse_link(link_elem, materials, filepath)
-            try:
-                robot.add_link(link)
-            except ValueError:
-                # Handle duplicate link names by renaming
-                original_name = link.name
-                counter = 1
-                while True:
-                    new_name = f"{original_name}_duplicate_{counter}"
-                    if new_name not in robot._link_index:
-                        link = replace(link, name=new_name)
-                        try:
-                            robot.add_link(link)
-                            logger.warning(
-                                f"Renamed duplicate link '{original_name}' to '{new_name}'"
-                            )
-                            break
-                        except ValueError:
-                            counter += 1
-                    else:
-                        counter += 1
+            link = parse_link(link_elem, materials, filepath, sandbox_root=sandbox_root)
+            self._add_link_robust(robot, link)
 
         # Parse all joints
         for joint_elem in root.findall("joint"):
-            joint = parse_joint(joint_elem)
             try:
-                robot.add_joint(joint)
+                joint = parse_joint(joint_elem)
+                self._add_joint_robust(robot, joint, joint_elem)
             except ValueError as e:
-                if "already exists" in str(e):
-                    # Handle duplicate joint name by renaming
-                    original_name = joint.name
-                    counter = 1
-                    while True:
-                        new_name = f"{original_name}_duplicate_{counter}"
-                        if new_name not in robot._joint_index:
-                            joint = replace(joint, name=new_name)
-                            try:
-                                robot.add_joint(joint)
-                                logger.warning(
-                                    f"Renamed duplicate joint '{original_name}' to '{new_name}'"
-                                )
-                                break
-                            except ValueError as inner_e:
-                                if "not found" in str(inner_e):
-                                    # Also handle missing parent/child during rename attempt
-                                    logger.warning(
-                                        f"Skipping duplicate joint '{original_name}' (renamed '{new_name}') "
-                                        f"due to broken reference: {inner_e}"
-                                    )
-                                    break
-                                counter += 1
-                        else:
-                            counter += 1
-                else:
-                    # Handle other ValueErrors (missing parent/child links)
-                    logger.warning(f"Skipping invalid joint '{joint.name}': {e}")
+                # Handle cases where parse_joint fails before add_joint (e.g. invalid type)
+                joint_name = joint_elem.get("name", "unnamed_joint")
+                logger.warning(f"Skipping invalid joint '{joint_name}': {e}")
 
         # Parse all transmissions
         for trans_elem in root.findall("transmission"):

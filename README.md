@@ -29,24 +29,24 @@ LinkForge is a professional **URDF & XACRO Bridge** for Blender.
 
 | Feature | Support | Details |
 | :--- | :--- | :--- |
-| **Links** | ✅ Full | Visual/Collision Geometry (STL/OBJ/GLB), Materials, Inertial Properties |
-| **Joint Types** | ✅ Full | Fixed, Revolute, Continuous, Prismatic, Planar, Floating |
-| **Physics** | ✅ Full | Automatic Mass & Inertia (Primitive & Mesh) |
-| **Sensors** | ✅ Full | Camera, LiDAR, IMU, GPS, Depth, Contact |
-| **Formats** | ✅ Full | URDF 1.0, XACRO (Macros & Properties) |
-| **Dynamics** | ✅ Full | Damping, Friction, Safety Limits |
-| **Control** | ✅ Full | `ros2_control` & Gazebo Classic/Sim |
+| **Links** | ✅ Full | Visual/Collision Geometry, Materials, Automatic Physics |
+| **Joints** | ✅ Full | All 6 types (Fixed, Revolute, etc.) + **Mimic Joints** |
+| **Sensors** | ✅ Full | Camera, LiDAR, IMU, GPS, **Contact**, **Force/Torque** |
+| **Control** | ✅ Full | `ros2_control` Dashboard & Gazebo Plugin Integration |
+| **Validation** | ✅ Pro | **Smart Integrity Checker** catches errors before export |
+| **Fidelity** | ✅ Pro | **Round-Trip Precision** for lossless Import/Export |
+| **Formats** | ✅ Full | URDF 1.0, XACRO (Macros, Properties, Multi-file) |
 
 ## 🚀 Key Features
 
 - **Bidirectional Workflow**: Seamlessly import existing URDF/XACRO files for editing or build complex robot models from scratch using Blender's native tools.
 - **Production-Ready Export**: Generates strictly compliant URDF/XACRO files optimized for ROS, ROS 2, and Gazebo. Output is clean, validated, and requires no manual post-processing.
 - **Smart Validation (The Safety Net)**: Built-in integrity checker inspects robot topology, physics data, and joint limits. It catches "exploding robot" errors (negative inertias, detached links) *before* you export.
-- **ROS2 Control Support**: Automatically generates hardware interface configurations for `ros2_control`, compatible with Gazebo, Webots, Isaac Sim, and physical hardware.
-- **Complete Sensor Suite**: Integrated support for Camera, Depth Camera, LiDAR, IMU, GPS, and Force/Torque sensors with configurable noise models.
+- **ROS2 Control Support**: Automatically generates hardware interface configurations for `ros2_control` via a centralized dashboard, compatible with Gazebo and physical hardware.
+- **Complete Sensor Suite**: Integrated support for Camera, Depth Camera, LiDAR, IMU, GPS, **Force/Torque**, and **Contact** sensors with configurable noise models.
 - **Automatic Physics**: Scientifically accurate calculation of mass properties and inertia tensors for both primitive shapes and complex arbitrary meshes.
 - **Advanced XACRO Support**: Intelligent extraction of repeated geometry into macros and shared materials, producing maintainable and modular code.
-- **Round-Trip Fidelity**: Import → Edit → Export cycle preserves all data absolute precision, including sensor origins, transmission interfaces, and custom user properties.
+- **Round-Trip Fidelity**: The Import → Edit → Export cycle preserves all data with **absolute precision**, including sensor origins, transmission interfaces, and custom user properties.
 
 ## 📦 Installation
 
@@ -68,37 +68,35 @@ LinkForge is a professional **URDF & XACRO Bridge** for Blender.
 ### Creating a Robot from Scratch
 
 1. **Create Links**
-   - Select a mesh → LinkForge panel → **Create Link**
-   - Configure mass, inertia, and collision geometry
-   - Repeat for all robot parts
+   - Select a mesh → **Forge** panel → **Create Link**
+   - Configure mass, inertia, and collision geometry in the **Physics** section.
+   - Repeat for all robot parts.
 
 2. **Connect with Joints**
-   - Select child link → **Create Joint**
-   - Choose joint type (Revolute, Prismatic, Continuous, Fixed)
-   - Set limits, axis, and dynamics
+   - Select child link → **Forge** panel → **Create Joint**
+   - Choose joint type (Revolute, Prismatic, Continuous, Fixed, etc.)
+   - Set limits, axis, and dynamics in the **Joint** section.
 
 3. **Add Sensors** (Optional)
-   - Select a link → **Add Sensor**
-   - Configure sensor type, update rate, and noise parameters
+   - Select a link → **Perceive** panel → **Add Sensor**
+   - Configure sensor properties in the **Sensor** section.
 
 4. **Configure Control** (Optional)
-   - Go to **Control Panel** → Enable **Use ROS2 Control**
-   - Click `+` to add joints to the Dashboard
-   - Configure interfaces (Position, Velocity, Effort)
+   - Go to the **Control** panel → Enable **Use ROS2 Control**
+   - Click `+` to add joints to the Joint Interfaces list.
+   - Configure Command/State interfaces (Position, Velocity, Effort).
 
 5. **Validate & Export**
-   - Click **Validate Robot** to check for errors
-   - Choose format (URDF/XACRO)
-   - Click **Export** → Done!
+   - Go to the **Validate & Export** panel.
+   - Click **Validate Robot** to check for integrity errors.
+   - Choose format (URDF/XACRO) and click **Export**.
 
 ### Importing Existing URDF
 
-1. **File > Import > URDF (.urdf)**
-2. Select your URDF file
-3. Edit in Blender
-4. Export back to URDF/XACRO
-
-
+1. Open the **LinkForge** sidebar tab (N-panel in 3D Viewport).
+2. In the **Forge** panel, click **Import URDF/XACRO**.
+3. Select your file and edit the robot structure normally.
+4. Export back via the **Validate & Export** panel.
 
 ## 📚 Examples
 
@@ -108,7 +106,6 @@ Complete examples in `examples/` directory:
 - `mobile_robot.urdf`: A simple mobile robot base.
 - `diff_drive_robot.urdf`: A differential drive robot with wheels.
 - `quadruped_robot.urdf`: A 4-legged robot demonstrating complex kinematic chains and multi-link assemblies.
-
 
 ## 📚 Documentation
 

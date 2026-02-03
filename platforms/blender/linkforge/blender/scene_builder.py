@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 import bpy
+from mathutils import Matrix
 
 from ..linkforge_core.logging_config import get_logger
 from ..linkforge_core.models import (
@@ -98,8 +100,10 @@ def create_primitive_mesh(geometry, name: str):
             if obj:
                 obj.name = name
                 obj.dimensions = (geometry.size.x, geometry.size.y, geometry.size.z)
+                # Force update to ensure dimensions are applied correctly before return
+                if hasattr(bpy.context, "view_layer"):
+                    bpy.context.view_layer.update()
                 obj["urdf_geometry_type"] = "BOX"
-                bpy.context.view_layer.update()
 
         elif isinstance(geometry, Cylinder):
             bpy.ops.mesh.primitive_cylinder_add(location=(0, 0, 0))
@@ -107,8 +111,9 @@ def create_primitive_mesh(geometry, name: str):
             if obj:
                 obj.name = name
                 obj.dimensions = (geometry.radius * 2, geometry.radius * 2, geometry.length)
+                if hasattr(bpy.context, "view_layer"):
+                    bpy.context.view_layer.update()
                 obj["urdf_geometry_type"] = "CYLINDER"
-                bpy.context.view_layer.update()
 
         elif isinstance(geometry, Sphere):
             bpy.ops.mesh.primitive_uv_sphere_add(location=(0, 0, 0))
@@ -116,8 +121,9 @@ def create_primitive_mesh(geometry, name: str):
             if obj:
                 obj.name = name
                 obj.dimensions = (geometry.radius * 2, geometry.radius * 2, geometry.radius * 2)
+                if hasattr(bpy.context, "view_layer"):
+                    bpy.context.view_layer.update()
                 obj["urdf_geometry_type"] = "SPHERE"
-                bpy.context.view_layer.update()
 
         else:
             return None
@@ -201,15 +207,21 @@ def import_mesh_file(mesh_path: Path, name: str):
         return None
 
     try:
-        # Get imported object (should be selected)
+        # Get all imported objects (should be selected)
         imported_objects = list(bpy.context.selected_objects)
-        if imported_objects:
-            obj = imported_objects[0]
-            obj.name = name
-            logger.debug(f"Successfully imported mesh: {obj.name}")
-            return obj
+        if not imported_objects:
+            logger.warning(f"Importer ran but no objects were found for '{mesh_path.name}'")
+            return None
 
-        logger.warning(f"Importer ran but no objects were found for '{mesh_path.name}'")
+        # Robust normalization and consolidation
+        # This returns a single object representing all imported parts,
+        # perfectly centered and reset to identity.
+        res_obj = normalize_and_consolidate_imported_objects(imported_objects, name)
+
+        if res_obj:
+            logger.debug(f"Successfully processed imported mesh: {res_obj.name}")
+            return res_obj
+
         return None
 
     except (RuntimeError, OSError) as e:
@@ -220,6 +232,84 @@ def import_mesh_file(mesh_path: Path, name: str):
         raise
 
     return None
+
+
+def normalize_and_consolidate_imported_objects(objects, name):
+    """Normalize transforms and consolidate multiple imported objects into one.
+
+    This handles complex hierarchies (like glTF) by:
+    1. Unparenting everything while keeping world transforms.
+    2. Finding all mesh objects.
+    3. Baking all transforms into geometry.
+    4. Joining all meshes into a single object named 'name'.
+    5. Resetting the final object to identity at (0,0,0).
+    """
+    if not objects:
+        return None
+
+    # Filter for meshes and get all children recursively
+    mesh_objs = []
+    to_delete = []
+
+    def process_recursive(o):
+        # Clear parent while keeping world transform
+        world_mat = o.matrix_world.copy()
+        o.parent = None
+        o.matrix_world = world_mat
+
+        if o.type == "MESH":
+            mesh_objs.append(o)
+        else:
+            to_delete.append(o)
+
+        # Collect children before unparenting them in the next recursion step
+        children = list(o.children)
+        for child in children:
+            process_recursive(child)
+
+    for obj in objects:
+        process_recursive(obj)
+
+    if not mesh_objs:
+        # Clean up empty containers if no mesh was found
+        for obj in to_delete:
+            with contextlib.suppress(RuntimeError, ReferenceError):
+                bpy.data.objects.remove(obj, do_unlink=True)
+        return None
+
+    # Step 2: Normalize and reset transforms
+    bpy.ops.object.select_all(action="DESELECT")
+    for obj in mesh_objs:
+        # Snap to world origin BEFORE baking anything
+        # This prevents the importer's world-position from being baked into vertices
+        obj.matrix_world = Matrix.Identity(4)
+        obj.select_set(True)
+
+    bpy.context.view_layer.objects.active = mesh_objs[0]
+
+    # Bake Rotation and Scale into vertex data for consistency (axis normalization)
+    # CRITICAL: location=False prevents the "Double-Offset" trap
+    bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+
+    # Step 3: Join meshes if there are multiple
+    final_obj = mesh_objs[0]
+    if len(mesh_objs) > 1:
+        bpy.ops.object.join()
+
+    # Step 4: Final cleanup
+    final_obj.name = name
+    final_obj.location = (0, 0, 0)
+    final_obj.rotation_euler = (0, 0, 0)
+    final_obj.scale = (1, 1, 1)
+
+    # Remove the Empties/containers that were part of the import
+    for obj in to_delete:
+        with contextlib.suppress(RuntimeError, ReferenceError):
+            bpy.data.objects.remove(obj, do_unlink=True)
+
+    # Restore context
+    bpy.context.view_layer.objects.active = final_obj
+    return final_obj
 
 
 def _get_geometry_type_str(geometry):
@@ -794,24 +884,8 @@ def setup_scene_for_robot(scene, robot: Robot):
                 continue
             break
 
-    # Legacy Transmissions are no longer auto-converted.
-    # We strictly respect the presence of <ros2_control> tags.
-    if (
-        hasattr(robot, "transmissions")
-        and robot.transmissions
-        and not scene.linkforge.use_ros2_control
-    ):
-        logger.info(
-            f"Note: {len(robot.transmissions)} legacy transmissions found but skipped. "
-            "LinkForge requires explicit <ros2_control> configuration."
-        )
-
-    # Reconstruct from ros2_control? (Handled primarily by Centralized migration)
-    # But for backward compatibility with 3rd party URDFs that use ros2_control
-    # but NO transmissions, we already populated the Centralized list above.
-    # No need to create redundant "Transmission" Empty objects.
-    elif hasattr(robot, "ros2_controls") and robot.ros2_controls:
-        logger.info("Imported centralized ros2_control config. (Skipping legacy transmissions)")
+    else:
+        scene.linkforge.use_ros2_control = False
 
 
 def import_robot_to_scene(robot: Robot, urdf_path: Path, context) -> bool:
@@ -838,15 +912,12 @@ def import_robot_to_scene(robot: Robot, urdf_path: Path, context) -> bool:
 
     # Count additional elements for better logging
     sensor_count = len(robot.sensors) if hasattr(robot, "sensors") else 0
-    transmission_count = len(robot.transmissions) if hasattr(robot, "transmissions") else 0
 
     # Create link objects
     link_objects = {}
     parts = [f"{len(robot.links)} links", f"{len(robot.joints)} joints"]
     if sensor_count > 0:
         parts.append(f"{sensor_count} sensors")
-    if transmission_count > 0:
-        parts.append(f"{transmission_count} transmissions")
 
     logger.info(f"Importing robot '{robot.name}' ({', '.join(parts)})")
 

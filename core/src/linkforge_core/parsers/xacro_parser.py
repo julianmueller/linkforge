@@ -6,6 +6,7 @@ properties, and includes.
 
 from __future__ import annotations
 
+import json
 import math
 import re
 import xml.etree.ElementTree as ET
@@ -13,15 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-try:
-    import yaml  # type: ignore
-except ImportError:
-    yaml = None
-
-try:
-    import json
-except ImportError:
-    json = None  # type: ignore
+import yaml  # type: ignore
 
 from ..base import RobotParser, RobotParserError
 from ..logging_config import get_logger
@@ -126,7 +119,7 @@ class XacroResolver:
                 # Apply namespace prefix if active
                 if self._ns_stack:
                     name = f"{'.'.join(self._ns_stack)}.{name}"
-                self.properties[name] = self._substitute(value or "")
+                self.properties[name] = self._try_parse_typed_value(self._substitute(value or ""))
             return ET.Element("skip")
 
         # 2. Handle arguments: <xacro:arg name="..." default="..."/>
@@ -134,7 +127,7 @@ class XacroResolver:
             name = element.get("name")
             default = element.get("default")
             if name and name not in self.args:
-                self.args[name] = self._substitute(default or "")
+                self.args[name] = self._try_parse_typed_value(self._substitute(default or ""))
             return ET.Element("skip")
 
         # 3. Handle includes: <xacro:include filename="..." ns="..."/>
@@ -238,9 +231,15 @@ class XacroResolver:
                     bits = p.split(":=")
                     p_name = bits[0]
                     # Substitute the default value from the parameter definition
-                    default = self._substitute(bits[1] if len(bits) > 1 else "")
+                    default = self._try_parse_typed_value(
+                        self._substitute(bits[1] if len(bits) > 1 else "")
+                    )
+
                     # Substitute the attribute value provided in the macro call
-                    local_props[p_name] = self._substitute(element.get(p_name) or default)
+                    raw_val = element.get(p_name)
+                    val = self._substitute(raw_val) if raw_val is not None else default
+
+                    local_props[p_name] = self._try_parse_typed_value(val)
 
                 # Expand macro body
                 parent_props = self.properties.copy()
@@ -299,13 +298,30 @@ class XacroResolver:
             except Exception:
                 return condition not in ("", "0", "false")
 
+    def _try_parse_typed_value(self, value: Any) -> Any:
+        """Attempt to parse a value into a more specific type (int, float, bool)."""
+        if not isinstance(value, str):
+            return value
+
+        # Try YAML (most robust and standard compliant)
+        try:
+            # safe_load handles ints, floats, bools (true/false), nulls
+            parsed = yaml.safe_load(value)
+            # If it's a primitive type, use it. If it's a collection, we might keep it.
+            if isinstance(parsed, (int, float, bool)) or parsed is None:
+                return parsed
+        except Exception:
+            pass
+
+        return value
+
     def _substitute(self, text: str) -> Any:
         """Handle ${prop}, $(arg name), and $(find pkg) substitutions with math."""
         if not text:
             return ""
 
         # 1. Handle arguments: $(arg name)
-        text = re.sub(r"\$\(arg (.*?)\)", lambda m: self.args.get(m.group(1), ""), text)
+        text = re.sub(r"\$\(arg (.*?)\)", lambda m: str(self.args.get(m.group(1), "")), text)
 
         # 2. Handle ROS package find: $(find package)
         # Note: We convert this to the package:// URI scheme commonly used in URDF.
@@ -444,7 +460,7 @@ class XACROParser(RobotParser):
         # Pass additional kwargs as initial xacro arguments
         for k, v in kwargs.items():
             if k not in ["search_paths"]:
-                resolver.args[k] = str(v)
+                resolver.args[k] = resolver._try_parse_typed_value(str(v))
 
         urdf_string = resolver.resolve_file(filepath)
 

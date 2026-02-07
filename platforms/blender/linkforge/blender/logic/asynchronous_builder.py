@@ -11,16 +11,16 @@ from pathlib import Path
 
 import bpy
 
-from ..linkforge_core.logging_config import get_logger
-from ..linkforge_core.models import Robot
-from ..linkforge_core.utils.kinematics import sort_joints_topological
-from .scene_builder import (
+from ...linkforge_core.logging_config import get_logger
+from ...linkforge_core.models import Robot
+from ...linkforge_core.utils.kinematics import sort_joints_topological
+from ..adapters.core_to_blender import (
     create_joint_object,
     create_link_object,
     create_sensor_object,
     setup_scene_for_robot,
 )
-from .utils.joint_utils import resolve_mimic_joints
+from ..utils.joint_utils import resolve_mimic_joints
 
 logger = get_logger(__name__)
 
@@ -137,6 +137,10 @@ class AsynchronousRobotBuilder:
                 scene.linkforge.import_status = current_status
 
             self.context.window_manager.progress_update(self.completed_tasks)
+
+            if not self.tasks:
+                self.finish()
+                return None
 
             return 0.001
 

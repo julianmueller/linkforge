@@ -828,12 +828,17 @@ class LINKFORGE_OT_generate_collision(Operator):
             self.report({"ERROR"}, "Failed to generate collision geometry")
             return {"CANCELLED"}
 
-        # Select the new collision
-        bpy.ops.object.select_all(action="DESELECT")
-        collision_obj.select_set(True)
+        # Restore selection (fall back to link if original object was deleted)
         vl = context.view_layer
-        if vl:
-            vl.objects.active = collision_obj
+        try:
+            obj.select_set(True)
+            if vl:
+                vl.objects.active = obj
+        except ReferenceError:
+            if link_obj:
+                link_obj.select_set(True)
+                if vl:
+                    vl.objects.active = link_obj
 
         lp = typing.cast(typing.Any, link_obj).linkforge
         self.report({"INFO"}, f"Generated '{collision_type}' collision for '{lp.link_name}'")

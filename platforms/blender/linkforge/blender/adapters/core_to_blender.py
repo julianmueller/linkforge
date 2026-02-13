@@ -21,6 +21,7 @@ from ...linkforge_core.models import (
     Sphere,
 )
 from ...linkforge_core.utils.kinematics import sort_joints_topological
+from ...linkforge_core.utils.path_utils import resolve_package_path
 from ..preferences import get_addon_prefs
 from ..utils.joint_utils import resolve_mimic_joints
 from ..utils.scene_utils import move_to_collection
@@ -29,7 +30,7 @@ logger = get_logger(__name__)
 
 
 def resolve_mesh_path(filepath: Path, urdf_dir: Path) -> Path:
-    """Resolve mesh path relative to URDF directory or as absolute path.
+    """Resolve mesh path relative to URDF directory, as package:// URI, or absolute.
 
     Args:
         filepath: Original mesh filepath from URDF
@@ -38,6 +39,18 @@ def resolve_mesh_path(filepath: Path, urdf_dir: Path) -> Path:
     Returns:
         Resolved Path object
     """
+    path_str = str(filepath)
+
+    # Handle package:// URIs
+    if "package:" in path_str:
+        resolved = resolve_package_path(path_str, urdf_dir)
+        if resolved and resolved.exists():
+            return resolved
+        logger.warning(f"Failed to resolve package URI: {path_str}")
+        # Fallback to stripping prefix and trying relative
+        path_str = path_str.replace("package://", "").replace("package:/", "")
+        filepath = Path(path_str)
+
     mesh_path = urdf_dir / filepath
     if not mesh_path.exists():
         # Try as absolute path
@@ -177,7 +190,21 @@ def import_mesh_file(mesh_path: Path, name: str) -> bpy.types.Object | None:
         ".stl": ["wm.stl_import"],
         ".glb": ["wm.gltf_import", "import_scene.gltf"],
         ".gltf": ["wm.gltf_import", "import_scene.gltf"],
+        ".dae": ["wm.collada_import"],
     }
+
+    # Bug #3: Conditional DAE support for Blender < 5.0.0
+    if ext == ".dae":
+        if bpy.app.version >= (5, 0, 0):
+            logger.error(
+                f"Collada (.dae) support was removed in Blender 5.0. "
+                f"Please convert '{mesh_path.name}' to .glb or .obj."
+            )
+            return None
+        logger.warning(
+            f"Collada (.dae) support is deprecated and will be removed in Blender 5.0. "
+            f"Consider converting '{mesh_path.name}' to a modern format like .glb."
+        )
 
     if ext not in operators:
         logger.warning(f"Unsupported mesh file extension: {ext} for '{mesh_path.name}'")

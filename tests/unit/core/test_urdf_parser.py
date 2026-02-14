@@ -1,4 +1,6 @@
 import xml.etree.ElementTree as ET
+from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from linkforge_core.base import RobotParserError, XacroDetectedError
@@ -787,9 +789,6 @@ class TestURDFParser:
     def test_coverage_edge_cases(self):
         """Test remaining edge cases for 100% coverage."""
         from linkforge_core.parsers.urdf_parser import (
-            TransmissionJoint,
-            _parse_transmission_component,
-            parse_material,
             parse_origin,
         )
 
@@ -798,6 +797,88 @@ class TestURDFParser:
         origin = parse_origin(ET.fromstring(xml))
         assert origin.xyz.x == 1.0
         assert origin.rpy.x == 0.1
+
+    def test_parse_file_not_found(self):
+        """Test parsing a non-existent file."""
+        from linkforge_core.parsers.urdf_parser import URDFParser
+
+        parser = URDFParser()
+        with pytest.raises(FileNotFoundError):
+            parser.parse(Path("non_existent_file.urdf"))
+
+    def test_parse_invalid_root(self, tmp_path):
+        """Test parsing an XML with invalid root element."""
+        from linkforge_core.parsers.urdf_parser import URDFParser
+
+        invalid_urdf = tmp_path / "invalid.urdf"
+        invalid_urdf.write_text("<not_robot></not_robot>")
+
+        parser = URDFParser()
+        with pytest.raises(ValueError, match="Root element must be <robot>"):
+            parser.parse(invalid_urdf)
+
+    def test_parse_string_unexpected_error(self):
+        """Test unexpected error during string parsing."""
+        from linkforge_core.parsers.urdf_parser import URDFParser
+
+        parser = URDFParser()
+        with (
+            patch("xml.etree.ElementTree.fromstring", side_effect=Exception("Boom")),
+            pytest.raises(RobotParserError, match="Unexpected error parsing URDF"),
+        ):
+            parser.parse_string("<robot name='test'/>")
+
+    def test_joint_renaming_robustness_broken_ref(self):
+        """Test robustness of joint renaming when duplicates exist AND references are broken."""
+        from linkforge_core.models import Joint, JointType, Robot
+        from linkforge_core.parsers.urdf_parser import URDFParser
+
+        robot = Robot(name="test_robot")
+        parser = URDFParser()
+        elem = ET.Element("joint", name="fixed_joint")
+        joint = Joint(name="fixed_joint", type=JointType.FIXED, parent="p", child="c")
+
+        # We need to simulate the exact conditions to hit the nested exception handler
+        # in _add_joint_robust.
+        # This requires add_joint to fail with "already exists" first (to enter rename loop),
+        # then fail with "not found" (to hit the break).
+
+        with patch.object(robot, "add_joint") as mock_add:
+            mock_add.side_effect = [
+                ValueError("Joint 'fixed_joint' already exists"),
+                ValueError("Link 'missing' not found"),
+            ]
+
+            parser._add_joint_robust(robot, joint, elem)
+
+            # Should have attempted twice
+            assert mock_add.call_count == 2
+
+    def test_parse_material_invalid_color(self):
+        """Test parsing invalid material colors."""
+        materials = {}
+
+        # Too few components
+        xml = '<material name="m"><color rgba="0.1 0.2" /></material>'
+        elem = ET.fromstring(xml)
+        assert parse_material(elem, materials) is None
+
+        # Too many components
+        xml = '<material name="m"><color rgba="0.1 0.2 0.3 0.4 0.5" /></material>'
+        elem = ET.fromstring(xml)
+        assert parse_material(elem, materials) is None
+
+    def test_parse_geometry_invalid_mesh(self):
+        """Test parsing invalid mesh geometry."""
+        # Missing filename
+        xml = "<geometry><mesh /></geometry>"
+        elem = ET.fromstring(xml)
+        assert parse_geometry(elem) is None
+
+        # Negative scale
+        xml = '<geometry><mesh filename="test.stl" scale="-1 1 1" /></geometry>'
+        elem = ET.fromstring(xml)
+        assert parse_geometry(elem) is None
 
         # 2. Geometry Errors
         # Cylinder invalid length (line 137)
@@ -827,6 +908,11 @@ class TestURDFParser:
         assert parse_material(ET.fromstring(xml), {}) is None
 
         # 4. Transmission Errors
+        from linkforge_core.parsers.urdf_parser import (
+            TransmissionJoint,
+            _parse_transmission_component,
+        )
+
         # Invalid mechanicalReduction (557-558)
         xml = '<joint name="j1"><mechanicalReduction>not_number</mechanicalReduction></joint>'
         comp = _parse_transmission_component(ET.fromstring(xml), TransmissionJoint)
@@ -890,10 +976,93 @@ class TestURDFParser:
             <joint name="good" type="fixed">
                  <parent link="base"/>
                  <child link="child"/>
-            </joint>
+             </joint>
         </robot>
         """
         parser = URDFParser()
         # parse_string uses _parse_robot internal logic
         robot = parser.parse_string(xml)
         assert len(robot.ros2_controls) == 1
+
+    def test_parse_gazebo_element_with_plugins(self):
+        """Cover line 991 in urdf_parser.py."""
+        from linkforge_core.parsers.urdf_parser import URDFParser
+
+        parser = URDFParser()
+        xml = """
+        <robot name="r">
+            <gazebo>
+                <plugin name="p" filename="lib.so"/>
+            </gazebo>
+        </robot>
+        """
+        robot = parser.parse_string(xml)
+        assert len(robot.gazebo_elements) == 1
+        assert len(robot.gazebo_elements[0].plugins) == 1
+        assert robot.gazebo_elements[0].plugins[0].name == "p"
+
+    def test_parse_file_iterparse_error(self, tmp_path):
+        """Cover line 1232 in urdf_parser.py."""
+        from unittest import mock
+
+        from linkforge_core.parsers.urdf_parser import URDFParser
+
+        path = tmp_path / "test.urdf"
+        path.touch()
+        parser = URDFParser()
+
+        # Mock ET.iterparse to raise ParseError
+        with (
+            mock.patch("xml.etree.ElementTree.iterparse", side_effect=ET.ParseError("Bad XML")),
+            pytest.raises(RobotParserError, match="Failed to parse URDF XML"),
+        ):
+            parser.parse(path)
+
+    def test_joint_renaming_collision_loop(self):
+        """Cover line 1336 in urdf_parser.py."""
+        from unittest import mock
+
+        from linkforge_core.models import Joint, JointType, Robot
+        from linkforge_core.parsers.urdf_parser import URDFParser
+
+        # Need to simulate: add 'j' -> exists. try 'j_dup_1' -> exists. try 'j_dup_2' -> ok.
+        robot = Robot(name="test")
+        parser = URDFParser()
+        joint = Joint(name="j", type=JointType.FIXED, parent="p", child="c")
+        elem = ET.Element("joint", name="j")
+
+        with mock.patch.object(robot, "add_joint") as m:
+            m.side_effect = [
+                ValueError("already exists"),  # j exists
+                ValueError("already exists"),  # j_duplicate_1 exists
+                None,  # j_duplicate_2 ok
+            ]
+
+            parser._add_joint_robust(robot, joint, elem)
+
+            assert m.call_count == 3
+
+    def test_link_renaming_robustness(self):
+        """Cover lines 1302-1303 in urdf_parser.py."""
+        from unittest import mock
+
+        from linkforge_core.models import Link, Robot
+        from linkforge_core.parsers.urdf_parser import URDFParser
+
+        robot = Robot(name="test")
+        parser = URDFParser()
+        link = Link(name="l")
+
+        # Mock robot.add_link to fail twice then succeed
+        with mock.patch.object(robot, "add_link") as m:
+            m.side_effect = [
+                ValueError("Link 'l' already exists"),
+                ValueError("Link 'l_duplicate_1' failed"),  # Trigger exception inside loop
+                None,  # Succeeds for l_duplicate_2
+            ]
+
+            with mock.patch("linkforge_core.parsers.urdf_parser.logger") as mock_logger:
+                parser._add_link_robust(robot, link)
+                assert m.call_count == 3
+                assert mock_logger.warning.called
+                assert "Renamed duplicate link" in mock_logger.warning.call_args[0][0]

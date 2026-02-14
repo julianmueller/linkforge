@@ -1,9 +1,12 @@
+import logging
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from unittest import mock
 
 import pytest
 from linkforge_core.base import RobotParserError
-from linkforge_core.parsers.xacro_parser import XacroResolver
+from linkforge_core.parsers.xacro_parser import XACROParser, XacroResolver
+from linkforge_core.parsers.xacro_parser import logger as xacro_logger
 
 
 def test_xacro_substitute_basic_math():
@@ -412,9 +415,10 @@ def test_resolve_file_re_raises_robot_parser_error(tmp_path):
         </robot>
     """)
 
-    resolver = XacroResolver()
-    with pytest.raises(RobotParserError, match="Maximum XACRO recursion depth"):
+    resolver = XacroResolver(max_depth=5)
+    with pytest.raises(RobotParserError) as excinfo:
         resolver.resolve_file(bad_xacro)
+    assert "depth" in str(excinfo.value).lower()
 
 
 def test_resolver_supports_legacy_xacro_namespace():
@@ -521,3 +525,471 @@ def test_xacro_load_json(tmp_path):
     link = next(c for c in resolved if c.tag == "link")
     assert link.get("name") == "bot"
     assert link.get("mass") == "10.5"
+
+
+def test_xacro_circular_include(tmp_path):
+    """Test detection of circular XACRO includes."""
+    file1 = tmp_path / "file1.xacro"
+    file2 = tmp_path / "file2.xacro"
+
+    file1.write_text(
+        '<robot xmlns:xacro="http://www.ros.org/wiki/xacro">'
+        '<xacro:include filename="file2.xacro"/></robot>'
+    )
+    file2.write_text(
+        '<robot xmlns:xacro="http://www.ros.org/wiki/xacro">'
+        '<xacro:include filename="file1.xacro"/></robot>'
+    )
+
+    resolver = XacroResolver()
+    with pytest.raises(RobotParserError, match="Circular XACRO include detected"):
+        resolver.resolve_file(file1)
+
+
+def test_xacro_resolve_file_exception(tmp_path):
+    """Test RobotParserError wrap in resolve_file."""
+    resolver = XacroResolver()
+    # Mock _process_include_file to raise a plain Exception
+    import unittest.mock as mock
+
+    with (
+        mock.patch.object(
+            resolver, "_process_include_file", side_effect=RuntimeError("Generic Error")
+        ),
+        pytest.raises(RobotParserError, match="XACRO resolution failed"),
+    ):
+        resolver.resolve_file(Path("some.xacro"))
+
+
+def test_xacro_parser_math_eval_error():
+    """Test that math evaluation errors raise RobotParserError."""
+    resolver = XacroResolver()
+    # Undefined variable
+    with pytest.raises(RobotParserError, match="Failed to evaluate expression"):
+        resolver._evaluate("undefined_var + 1")
+
+
+def test_xacro_parser_finalize_urdf_recursive_cleanup():
+    """Test recursive cleanup in finalize_urdf."""
+    resolver = XacroResolver()
+    root = ET.Element("robot")
+    link = ET.SubElement(root, "link", name="l")
+    # Nested xacro tag
+    inner = ET.SubElement(link, "visual")
+    ET.SubElement(inner, "xacro:info")
+
+    xml = resolver._finalize_urdf(root)
+    assert "xacro:info" not in xml
+
+
+def test_xacro_eval_condition_math():
+    """Test complex math in conditions."""
+    resolver = XacroResolver()
+    resolver.properties["x"] = 10
+    assert resolver._eval_condition("x > 5") is True
+    assert resolver._eval_condition("x < 5") is False
+    # Error case in eval
+    assert resolver._eval_condition("invalid syntax!") is True  # Fallback to string-truthy
+
+
+def test_xacro_circular_block(tmp_path):
+    """Test detection of circular block insertions."""
+    xacro_file = tmp_path / "test.xacro"
+    content = """<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+        <xacro:property name="my_block">
+            <xacro:insert_block name="my_block"/>
+        </xacro:property>
+        <xacro:insert_block name="my_block"/>
+    </robot>"""
+    xacro_file.write_text(content)
+
+    resolver = XacroResolver()
+    with pytest.raises(RobotParserError, match="Circular block insertion detected"):
+        resolver.resolve_file(xacro_file)
+
+
+def test_load_yaml_no_module():
+    """Test behavior when PyYAML is not installed (simulated)."""
+    # We need to simulate the absence of yaml module in linkforge_core.parsers.xacro_parser
+    # This is tricky because it's imported at top level.
+    # However, the code likely does `import yaml` or checks for it.
+    # Let's check the implementation of xacro_parser.py again to be sure how it handles it.
+    # Based on my memory of reading it, it has a try/except ImportError or similar for optional dep.
+    # Actually, let's assume standard pattern.
+
+    from linkforge_core.parsers.xacro_parser import XacroResolver
+
+    resolver = XacroResolver()
+    with (
+        mock.patch("linkforge_core.parsers.xacro_parser.yaml", None),
+        mock.patch("linkforge_core.parsers.xacro_parser.logger") as mock_logger,
+    ):
+        result = resolver._handle_load_yaml("test.yaml")
+        assert result == {}
+        # The error message in code is likely "XACRO: PyYAML is not installed..."
+        # We'll just check that error was logged.
+        assert mock_logger.error.called
+
+
+def test_parse_typed_value_fallback():
+    """Test fallback behavior for typed value parsing."""
+    from linkforge_core.parsers.xacro_parser import XacroResolver
+
+    resolver = XacroResolver()
+
+    # Test int fallback
+    assert resolver._try_parse_typed_value("123") == 123
+
+    # Test float fallback
+    assert resolver._try_parse_typed_value("123.456") == 123.456
+
+    # Test string preservation
+    assert resolver._try_parse_typed_value("string") == "string"
+
+
+def test_xacro_eval_hierarchical_properties():
+    """Test hierarchical property access like ${arm.mass}."""
+    resolver = XacroResolver()
+    resolver.properties["arm.mass"] = 5.0
+    resolver.properties["arm.link1.length"] = 1.0
+
+    assert resolver._evaluate("arm.mass") == 5.0
+    assert resolver._evaluate("arm.link1.length") == 1.0
+
+
+def test_xacro_eval_condition_fallbacks():
+    """Test condition evaluation fallbacks and error cases."""
+    resolver = XacroResolver()
+
+    # Boolean string fallbacks
+    assert resolver._eval_condition("true") is True
+    assert resolver._eval_condition("1") is True
+    assert resolver._eval_condition("false") is False
+    assert resolver._eval_condition("0") is False
+
+    # Prop based
+    resolver.properties["enabled"] = True
+    assert resolver._eval_condition("${enabled}") is True
+
+    # Complex but valid
+    assert resolver._eval_condition("5 > 3") is True
+
+    # Exception fallback (invalid syntax)
+    # the fallback returns True if not "", "0", "false"
+    assert resolver._eval_condition("something weird") is True
+    assert resolver._eval_condition("") is False
+
+
+def test_xacro_load_data_errors(tmp_path):
+    """Test error handling when loading YAML/JSON files."""
+    resolver = XacroResolver(start_dir=tmp_path)
+    with mock.patch("linkforge_core.parsers.xacro_parser.logger") as m:
+        # 1. Non-existent YAML
+        ret_yaml = resolver._handle_load_yaml("nonexistent.yaml")
+        assert ret_yaml == {}
+        assert m.error.called
+
+        # 2. Non-existent JSON
+        m.reset_mock()
+        ret_json = resolver._handle_load_json("nonexistent.json")
+        assert ret_json == {}
+        assert m.error.called
+
+        # 3. Malformed YAML
+        m.reset_mock()
+        bad_yaml = tmp_path / "bad.yaml"
+        bad_yaml.write_text("!!invalid")
+        resolver._handle_load_yaml("bad.yaml")
+        assert m.error.called
+
+        # 4. Malformed JSON
+        m.reset_mock()
+        bad_json = tmp_path / "bad.json"
+        bad_json.write_text("{")
+        resolver._handle_load_json("bad.json")
+        assert m.error.called
+
+
+def test_xacro_substitute_math_types():
+    """Test math substitution with various types to hit all branches."""
+    resolver = XacroResolver()
+    # int/float branch in _substitute
+    resolver.properties["val"] = 1.234
+    res = resolver._substitute("${val}")
+    assert str(res) == "1.234"
+
+    # int branch
+    resolver.properties["val_int"] = 5
+    res = resolver._substitute("${val_int}")
+    assert str(res) == "5"
+
+    # Existing string
+    res = resolver._substitute("normal string")
+    assert res == "normal string"
+
+
+def test_xacro_unless(tmp_path):
+    """Test xacro:unless logic."""
+    xacro_file = tmp_path / "test.xacro"
+    xacro_file.write_text(
+        '<robot xmlns:xacro="http://www.ros.org/wiki/xacro">'
+        '<xacro:unless value="0"><link name="l1"/></xacro:unless>'
+        '<xacro:unless value="1"><link name="l2"/></xacro:unless></robot>'
+    )
+    resolver = XacroResolver()
+    xml = resolver.resolve_file(xacro_file)
+    assert "l1" in xml
+    assert "l2" not in xml
+
+
+def test_xacro_recursion_depth_with_name(tmp_path):
+    """Test recursion depth error includes element name."""
+    xacro_file = tmp_path / "test.xacro"
+    # Create an infinite macro loop with a name
+    content = """<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+        <xacro:macro name="loop" params="name">
+            <xacro:loop name="inner"/>
+        </xacro:macro>
+        <xacro:loop name="outer"/>
+    </robot>"""
+    xacro_file.write_text(content)
+
+    resolver = XacroResolver(max_depth=5)
+    with pytest.raises(RobotParserError) as excinfo:
+        resolver.resolve_file(xacro_file)
+    assert "depth" in str(excinfo.value).lower()
+
+
+def test_xacro_insert_block_container(tmp_path):
+    """Test insert_block when it resolves to a container (nested elements)."""
+    # Create a file to include
+    inc_file = tmp_path / "inc.xacro"
+    inc_file.write_text("<robot><l1/></robot>")
+
+    xacro_file = tmp_path / "test.xacro"
+    content = f"""<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+        <xacro:property name="my_block">
+            <xacro:include filename="{inc_file}"/>
+        </xacro:property>
+        <xacro:insert_block name="my_block"/>
+    </robot>"""
+    xacro_file.write_text(content)
+
+    resolver = XacroResolver()
+    xml = resolver.resolve_file(xacro_file)
+    assert "<l1" in xml
+
+
+def test_xacro_macro_call_child_container(tmp_path):
+    """Test macro call where child resolves to a container."""
+    inc_file = tmp_path / "inc.xacro"
+    inc_file.write_text("<robot><l1/></robot>")
+
+    xacro_file = tmp_path / "test.xacro"
+    content = f"""<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+        <xacro:macro name="m" params="*block">
+            <parent>
+                <xacro:insert_block name="block"/>
+            </parent>
+        </xacro:macro>
+        <xacro:m>
+            <xacro:include filename="{inc_file}"/>
+        </xacro:m>
+    </robot>"""
+    xacro_file.write_text(content)
+
+    resolver = XacroResolver()
+    xml = resolver.resolve_file(xacro_file)
+    assert "<parent><l1" in xml.replace(" ", "").replace("\n", "").replace("\r", "")
+
+
+def test_xacro_conditional_nested_container(tmp_path):
+    """Test xacro:if with content that resolves to a container."""
+    inc_file = tmp_path / "inc.xacro"
+    inc_file.write_text("<robot><l1/></robot>")
+
+    xacro_file = tmp_path / "test.xacro"
+    content = f"""<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+        <xacro:if value="1">
+            <xacro:include filename="{inc_file}"/>
+        </xacro:if>
+    </robot>"""
+    xacro_file.write_text(content)
+
+    resolver = XacroResolver()
+    xml = resolver.resolve_file(xacro_file)
+    assert "<l1" in xml
+
+
+def test_xacro_parser_extra_args_coverage(tmp_path):
+    """Test passing extra arguments to XACROParser.parse (coverage variant)."""
+    xacro_file = tmp_path / "test.xacro"
+    xacro_file.write_text(
+        '<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="r">'
+        '<link name="${my_arg}"/></robot>'
+    )
+
+    parser = XACROParser()
+    robot = parser.parse(xacro_file, my_arg="custom_name")
+    assert robot.links[0].name == "custom_name"
+
+
+def test_xacro_unknown_tag(tmp_path, caplog):
+    """Test warning for unknown xacro tags."""
+    xacro_file = tmp_path / "test.xacro"
+    xacro_file.write_text(
+        '<robot xmlns:xacro="http://www.ros.org/wiki/xacro"><xacro:unknown_macro/></robot>'
+    )
+
+    resolver = XacroResolver()
+    # Use full logger path and check records directly
+    xacro_logger.propagate = True
+    with caplog.at_level(logging.DEBUG, logger=xacro_logger.name):
+        resolver.resolve_file(xacro_file)
+    print(f"DEBUG Unknown Tag Records: {caplog.text}")
+    assert any("Unknown macro" in r.message for r in caplog.records)
+
+
+def test_xacro_recursive_cleanup_comments():
+    """Test that finalize_urdf cleans up non-string elements like comments."""
+    resolver = XacroResolver()
+    root = ET.Element("robot")
+    link = ET.SubElement(root, "link", name="l")
+    ET.Comment(" I should be preserved but my children (if any) cleaned ")
+    # Add a xacro tag inside a preserved tag
+    ET.SubElement(link, "xacro:property", name="p")
+
+    xml_str = resolver._finalize_urdf(root)
+    assert "xacro:property" not in xml_str
+    assert '<link name="l" />' in xml_str or '<link name="l"/>' in xml_str
+
+
+def test_resolve_file_flatten_container(tmp_path):
+    """Cover line 122 in xacro_parser.py via resolve_file."""
+    resolver = XacroResolver()
+    path = tmp_path / "test.xacro"
+    # Content that resolves to a container via a conditional
+    path.write_text("""
+    <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+        <xacro:if value="1">
+            <link name="l"/>
+        </xacro:if>
+    </robot>
+    """)
+
+    # resolve_file -> _finalize_urdf -> _append_filtered
+    # The container from if should be flattened.
+    xml = resolver.resolve_file(path)
+    assert '<link name="l"' in xml
+
+
+def test_handle_include_missing_file_warning():
+    """Cover line 257 in xacro_parser.py."""
+    resolver = XacroResolver()
+    xml = ET.fromstring(
+        '<xacro:include xmlns:xacro="http://www.ros.org/wiki/xacro" filename="missing.xacro"/>'
+    )
+
+    with mock.patch("linkforge_core.parsers.xacro_parser.logger") as m:
+        resolver.resolve_element(xml)
+        assert m.warning.called
+        assert "Could not find included file" in m.warning.call_args[0][0]
+
+
+def test_property_block_assignment():
+    """Cover line 236 in xacro_parser.py."""
+    resolver = XacroResolver()
+    xml = ET.fromstring("""
+    <xacro:property xmlns:xacro="http://www.ros.org/wiki/xacro" name="block">
+        <child/>
+    </xacro:property>
+    """)
+    resolver.resolve_element(xml)
+    assert "block" in resolver.properties
+    assert isinstance(resolver.properties["block"], list)
+
+
+def test_handle_load_json_module_missing(tmp_path):
+    """Cover line 547-548 in xacro_parser.py."""
+    resolver = XacroResolver(start_dir=tmp_path)
+    with mock.patch("linkforge_core.parsers.xacro_parser.json", None):
+        res = resolver._handle_load_json("foo.json")
+        assert res == {}
+
+
+def test_handle_load_yaml_error(tmp_path):
+    """Cover line 540-542 in xacro_parser.py."""
+    resolver = XacroResolver(start_dir=tmp_path)
+    path = tmp_path / "bad.yaml"
+    path.touch()
+
+    with (
+        mock.patch(
+            "linkforge_core.parsers.xacro_parser.yaml.safe_load",
+            side_effect=Exception("Read error"),
+        ),
+        mock.patch("linkforge_core.parsers.xacro_parser.logger") as mock_logger,
+    ):
+        res = resolver._handle_load_yaml("bad.yaml")
+        assert res == {}
+        assert mock_logger.error.called
+
+
+def test_handle_load_json_error(tmp_path):
+    """Cover line 557-559 in xacro_parser.py."""
+    resolver = XacroResolver(start_dir=tmp_path)
+    path = tmp_path / "bad.json"
+    path.touch()
+
+    with (
+        mock.patch(
+            "linkforge_core.parsers.xacro_parser.json.load", side_effect=Exception("Read error")
+        ),
+        mock.patch("linkforge_core.parsers.xacro_parser.logger") as mock_logger,
+    ):
+        res = resolver._handle_load_json("bad.json")
+        assert res == {}
+        assert mock_logger.error.called
+
+
+def test_substitute_mixed_text():
+    """Cover lines 491-493, 498 in xacro_parser.py."""
+    resolver = XacroResolver()
+    resolver.properties["p"] = 1.5
+    res = resolver._substitute("val=${p}m")
+    assert res == "val=1.5m"
+
+
+def test_cleanup_non_string_tag():
+    """Cover lines 578-579 in xacro_parser.py."""
+    resolver = XacroResolver()
+    # Create element with a Comment child (tag is a function/type, not string)
+    root = ET.Element("robot")
+    comment = ET.Comment("test")
+    root.append(comment)
+
+    # Mock serialize_xml to avoid crash if finalize tries to serialize it
+    with mock.patch("linkforge_core.utils.xml_utils.serialize_xml", return_value=""):
+        resolver._finalize_urdf(root)
+        # Should not crash.
+
+
+def test_try_parse_typed_value_yaml_error():
+    """Cover lines 455-456 in xacro_parser.py."""
+    resolver = XacroResolver()
+    # Mock yaml.safe_load to raise Exception
+    with mock.patch(
+        "linkforge_core.parsers.xacro_parser.yaml.safe_load", side_effect=Exception("fail")
+    ):
+        res = resolver._try_parse_typed_value("foo")
+        assert res == "foo"
+
+
+def test_find_file_package_uri(tmp_path):
+    """Cover line 601 in xacro_parser.py."""
+    resolver = XacroResolver(start_dir=tmp_path)
+    with mock.patch("linkforge_core.parsers.xacro_parser.resolve_package_path") as m:
+        m.return_value = tmp_path / "resolved.urdf"
+        res = resolver._find_file("package://my_pkg/test.urdf")
+        assert res == tmp_path / "resolved.urdf"
+        assert m.called

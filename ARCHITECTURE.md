@@ -19,19 +19,19 @@ graph LR
         Operators[Operators<br/>User Actions]
         Properties[Properties<br/>Data Storage]
         Adapters[Adapters<br/>Bridge & Mesh Export]
-        Logic[Logic<br/>Domain Integration]
+        Logic[Logic<br/>Async Import]
         Visualization[Visualization<br/>Gizmos & Overlays]
+        Preferences[Preferences<br/>Addon Settings]
         Utils[Utils<br/>Low-level Helpers]
     end
 
-    Panels --> Operators
+    Panels --> Utils
+    Panels --> Adapters
     Operators --> Properties
-    Operators --> Adapters
-    Operators --> Logic
-    Properties --> Adapters
-    Adapters --> Utils
+    Operators --> Utils
     Logic --> Adapters
-    Visualization --> Utils
+    Logic --> Utils
+    Visualization --> Preferences
 
     style Panels fill:#4fc3f7
     style Operators fill:#4fc3f7
@@ -39,18 +39,21 @@ graph LR
     style Adapters fill:#ce93d8
     style Logic fill:#ffb74d
     style Visualization fill:#a1887f
+    style Preferences fill:#ef9a9a
     style Utils fill:#ba68c8
 ```
 
 #### Components
 
-| Module | Purpose | Key Files |
-|--------|---------|-----------|
-| **Adapters** | Conversion between Blender ↔ Core (Directional) | `blender_to_core.py`, `core_to_blender.py`, `mesh_io.py` |
-| **Logic** | Domain-specific integration logic | `asynchronous_builder.py` |
-| **Visualization** | Viewport overlays and gizmos | `joint_gizmos.py`, `inertia_gizmos.py` |
-| **UI** | Panels and Operators | `panels/`, `operators/` |
-| **Storage** | Blender-side property definitions | `properties/` |
+| Module | Purpose |
+|--------|----------|
+| **Adapters** | Conversion between Blender ↔ Core (Directional) |
+| **Logic** | Async robot import orchestration |
+| **Visualization** | Viewport overlays and gizmos |
+| **UI** | Panels and Operators |
+| **Preferences** | Addon settings and toggle callbacks |
+| **Properties** | Blender-side property definitions |
+| **Utils** | Shared helpers (decorators, context guards) |
 
 ### Adapters Layer
 
@@ -78,9 +81,13 @@ graph TB
     end
 
     Parsers --> Models
+    Parsers --> Utils
+    Parsers --> Validation
     Generators --> Models
+    Generators --> Utils
     Physics --> Models
     Validation --> Models
+    Models --> Utils
     Utils --> Models
 
     style Models fill:#4fc3f7
@@ -93,14 +100,14 @@ graph TB
 
 #### Components
 
-| Module | Purpose | Key Files/Classes |
-|--------|---------|-------------|
-| **Models** | Core data structures | `Robot`, `Link`, `Joint`, `Sensor`, `Ros2Control`, `Transmission`, `GazeboElement`, `GazeboPlugin` |
-| **Parsers** | URDF/XACRO → Python objects | `parsers/urdf_parser.py`, `parsers/xacro_parser.py` |
-| **Generators** | Python objects → URDF/XACRO | `urdf_generator.py`, `xacro_generator.py` |
-| **Physics** | Mass & inertia calculations | `physics/inertia.py` |
-| **Validation** | Error checking & security | `validation/validator.py`, `validation/security.py` |
-| **Utils** | Unified internal logic | `utils/math_utils.py`, `utils/string_utils.py`, `utils/xml_utils.py`, `utils/kinematics.py` |
+| Module | Purpose |
+|--------|----------|
+| **Models** | Core data structures (`Robot`, `Link`, `Joint`, `Sensor`, `Ros2Control`, `Transmission`, `GazeboElement`) |
+| **Parsers** | URDF/XACRO → Python objects |
+| **Generators** | Python objects → URDF/XACRO |
+| **Physics** | Mass & inertia calculations |
+| **Validation** | Error checking & security |
+| **Utils** | Shared internal logic (math, strings, XML, kinematics) |
 
 ## Data Flow
 
@@ -170,13 +177,18 @@ sequenceDiagram
 classDiagram
     class Robot {
         +str name
-        +list~Link~ links
-        +list~Joint~ joints
+        +str version
         +list~Sensor~ sensors
+        +list~Transmission~ transmissions
         +list~Ros2Control~ ros2_controls
+        +list~GazeboElement~ gazebo_elements
+        +add_link(link)
+        +add_joint(joint)
+        +add_sensor(sensor)
+        +add_transmission(transmission)
+        +add_gazebo_element(element)
+        +add_ros2_control(ros2_control)
         +validate_tree_structure()
-        +add_link()
-        +add_joint()
     }
 
     class Link {
@@ -184,6 +196,21 @@ classDiagram
         +list~Visual~ visuals
         +list~Collision~ collisions
         +Inertial inertial
+    }
+
+    class Inertial {
+        +float mass
+        +Transform origin
+        +InertiaTensor inertia
+    }
+
+    class InertiaTensor {
+        +float ixx
+        +float ixy
+        +float ixz
+        +float iyy
+        +float iyz
+        +float izz
     }
 
     class Joint {
@@ -194,23 +221,118 @@ classDiagram
         +Transform origin
         +Vector3 axis
         +JointLimits limits
+        +JointDynamics dynamics
+        +JointMimic mimic
+    }
+
+    class JointLimits {
+        +float lower
+        +float upper
+        +float effort
+        +float velocity
+    }
+
+    class JointDynamics {
+        +float damping
+        +float friction
+    }
+
+    class JointMimic {
+        +str joint
+        +float multiplier
+        +float offset
     }
 
     class Sensor {
         +str name
         +SensorType type
         +str link_name
+        +float update_rate
+        +bool always_on
+        +bool visualize
+        +str topic
         +Transform origin
+        +GazeboPlugin plugin
         +CameraInfo camera_info
         +LidarInfo lidar_info
+    }
+
+    class GazeboElement {
+        +str reference
+        +str material
+        +bool self_collide
+        +bool static
+        +bool gravity
+        +float mu1
+        +float mu2
+        +float kp
+        +float kd
+        +float stop_cfm
+        +float stop_erp
+        +bool provide_feedback
+        +bool implicit_spring_damper
+        +list~GazeboPlugin~ plugins
+    }
+
+    class GazeboPlugin {
+        +str name
+        +str filename
+        +dict parameters
+    }
+
+    class Ros2Control {
+        +str name
+        +str type
+        +str hardware_plugin
+        +list~Ros2ControlJoint~ joints
+        +dict parameters
+    }
+
+    class Ros2ControlJoint {
+        +str name
+        +list~str~ command_interfaces
+        +list~str~ state_interfaces
+    }
+
+    class Transmission {
+        +str name
+        +str type
+        +list~TransmissionJoint~ joints
+        +list~TransmissionActuator~ actuators
+        +dict parameters
+    }
+
+    class TransmissionJoint {
+        +str name
+        +list~str~ hardware_interfaces
+        +float mechanical_reduction
+        +float offset
+    }
+
+    class TransmissionActuator {
+        +str name
+        +list~str~ hardware_interfaces
+        +float mechanical_reduction
+        +float offset
     }
 
     Robot "1" *-- "many" Link
     Robot "1" *-- "many" Joint
     Robot "1" *-- "many" Sensor
+    Robot "1" *-- "many" GazeboElement
+    Robot "1" *-- "many" Ros2Control
     Link "1" *-- "many" Visual
     Link "1" *-- "many" Collision
-    Link "1" *-- "1" Inertial
+    Link "1" *-- "0..1" Inertial
+    Inertial "1" *-- "1" InertiaTensor
+    Joint "1" *-- "0..1" JointLimits
+    Joint "1" *-- "0..1" JointDynamics
+    Joint "1" *-- "0..1" JointMimic
+    GazeboElement "1" *-- "many" GazeboPlugin
+    Sensor "1" *-- "0..1" GazeboPlugin
+    Ros2Control "1" *-- "many" Ros2ControlJoint
+    Transmission "1" *-- "many" TransmissionJoint
+    Transmission "1" *-- "many" TransmissionActuator
 ```
 
 ### Geometry Models
@@ -290,49 +412,54 @@ To handle "dirty" mesh hierarchies (common in CAD imports), the Builder employs 
 ### 5. **Atomic Sanitization**
 All user input (names, file paths) is sanitized at the edge of the system (during Export) to ensure OS and URDF compatibility without restricting the user's Blender naming conventions.
 
+### 6. **Data Integrity & Preservation**
+LinkForge distinguishes between user-created assets and imported "Source of Truth" assets. Imported assets are locked to prevent accidental modification during the Blender iterative workflow.
+
 ## Extension Points
 
-### Adding New Sensor Types
+As an extensible framework, LinkForge is designed with clear "hooks" for adding new robotics features.
 
-1. Add enum to `SensorType` in `models/sensor.py`
-2. Create info dataclass (e.g., `MyNewSensorInfo`)
-3. Add parsing logic in `parsers/urdf_parser.py`
-4. Add generation logic in `urdf_generator.py`
-5. Add Blender UI in `panels/sensor_panel.py`
+### Adding New Sensor Types
+To support a new sensor (e.g., a custom LiDAR or Depth Camera variant):
+1. **Model**: Add enum to `SensorType` and create a metadata dataclass in `linkforge_core/models/sensor.py`.
+2. **Parser**: Update `URDFParser._parse_sensor` in `linkforge_core/parsers/urdf_parser.py`.
+3. **Generator**: Add XML mapping in `linkforge_core/generators/urdf_generator.py`.
+4. **UI**: Add property group and panel logic in `blender/properties/sensor_props.py` and `blender/panels/sensor_panel.py`.
 
 ### Adding New Joint Types
+To implement experimental joint types (e.g., screw joints or custom bushings):
+1. **Model**: Add enum to `JointType` in `linkforge_core/models/joint.py`.
+2. **Validation**: Update `Joint.__post_init__` for type-specific constraints.
+3. **Parser/Generator**: Update the corresponding logic in `urdf_parser.py` and `urdf_generator.py`.
+4. **Gizmos**: Add custom drawing logic in `blender/visualization/joint_gizmos.py`.
 
-1. Add enum to `JointType` in `models/joint.py`
-2. Update validation in `Joint.__post_init__()`
-3. Update parser in `parsers/urdf_parser.py`
-4. Update generator in `urdf_generator.py`
-5. Add gizmo visualization in `utils/joint_gizmos.py`
+### Adding New Mesh Formats
+To support additional 3D formats (e.g., USD or PLY):
+1. **Core**: Ensure `Mesh` model handles paths correctly in `linkforge_core/models/geometry.py`.
+2. **Blender Logic**: Implement the export wrapper in `blender/adapters/mesh_io.py`.
+3. **UI/Export**: Add the format option to the global `RobotPropertyGroup` in `blender/properties/robot_props.py`.
 
 ## Performance Considerations
 
-### Mesh Processing
-- **Inertia calculation**: O(n) where n = triangle count
-- **Primitive detection**: O(1) with tolerance checks
-- **Mesh export**: Cached to avoid redundant I/O
+### Core Optimizations
+- **Inertia calculation**: O(n) where n = triangle count (canonical integration).
+- **Primitive detection**: O(1) using mesh topology heuristics.
+- **Viewport interaction**: Debounced (0.3s delay) for responsive UI during property manipulation.
+- **Lookup efficiency**: O(1) hash-map indexing for links and joints.
 
-### URDF Parsing
-- **XML parsing**: O(n) where n = file size
-- **Tree validation**: O(V + E) where V = links, E = joints
-- **Security checks**: O(1) per mesh path
+### Scalability
+- **Complex Robots**: Supports multi-link chains, branched trees, and multi-sensor configurations.
+- **Large Files**: Tested with URDF/XACRO assets up to 100 MB.
+- **Headless Mode**: Fully optimized for automated CI and background processing.
 
-### Blender Integration
-- **Scene conversion**: O(n) where n = objects in scene
-- **Property updates**: O(1) with Blender's property mirroring
-- **Viewport updates**: Throttled to 60 FPS max
-
-## Testing Strategy
+### Testing Strategy
 
 ```mermaid
 graph TB
     subgraph "Test Pyramid"
-        Integration[Integration Tests<br/>System Workflows]
-        Blender[Blender Unit Tests<br/>Real Headless API]
-        Core[Core Unit Tests<br/>Pure Logic]
+        Integration[Integration Tests<br/>Inertia, Roundtrips, Features]
+        Blender[Blender Unit Tests<br/>Headless API Validation]
+        Core[Core Unit Tests<br/>Pure Pure Math & Models]
     end
 
     Integration --> Blender
@@ -343,44 +470,20 @@ graph TB
     style Core fill:#81c784
 ```
 
-### Test Categories
-- **Unit Tests (Core)**: Isolated tests for platform-independent data models and math.
-- **Unit Tests (Blender)**: Tests for Blender-specific logic running in a real headless Blender environment.
-- **Integration Tests**: Full workflow validation organized into specialized subdirectories:
-  - `parsers/`: URDF/Xacro parsing logic and complex includes.
-  - `blender/`: End-to-end Roundtrip (Import → Scene Setup → Export).
-  - `features/`: Specific functionality like Inertia, **Sanitization**, and **Normalization**.
+Comprehensive execution instructions and setup details for each layer are maintained in the **[CONTRIBUTING.md](https://github.com/arounamounchili/linkforge/blob/main/CONTRIBUTING.md#testing)** guide.
 
-## Security Architecture
+## Security by Design
 
-### Defense Layers
+LinkForge implements a multi-layered security architecture to protect against malicious URDF/XACRO inputs:
 
-1. **Input Validation**
-   - XML depth limits (prevent XML bombs)
-   - Numeric range checks (prevent NaN/Inf)
-   - String sanitization (prevent injection)
-
-2. **Path Security**
-   - Mesh path validation (prevent traversal outside Sandbox Root)
-   - Sandbox Root Auto-Detection (allows sibling folders)
-   - Package URI validation
-   - Strict Whitelist-based approach
-
-3. **Resource Limits**
-   - Max file size: 100 MB
-   - Max XML depth: 100 levels
-   - Max numeric value: ±1e10
+1. **Sandboxed I/O**: The **Sandbox Root** auto-detection prevents path traversal attacks by restricting mesh asset access to the robot's package directory.
+2. **Resource Throttling**: Hard limits on file size (100MB), XML nesting depth (100), and numeric ranges (±1e10) protect against "Billion Laughs" attacks and system resource exhaustion.
+3. **Atomic Sanitization**: All incoming strings (links, joints, meshes) are sanitized at the engine's edge to ensure validity for both URDF XML and cross-platform filesystems.
+4. **Validation Pass**: The `RobotValidator` performs a pre-export sanity check to ensure kinematic connectivity and physical property validity.
 
 
-## Scalability
-- **Complex Robots**: Supports multi-link chains, branched trees, and multi-sensor configurations.
-- Parser handles files up to 100 MB
-- Blender integration tested with complex quadrupeds
-
-### 5. **Data Integrity & Preservation**
-LinkForge distinguishes between user-created assets and imported "Source of Truth" assets. Imported assets are locked to prevent accidental modification during the Blender iterative workflow.
 
 ---
 
-**Last Updated:** 2026-02-08
+**Last Updated:** 2026-02-15
 **Version:** 1.2.2

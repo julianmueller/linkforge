@@ -30,13 +30,19 @@ def schedule_collision_preview_update(obj: bpy.types.Object) -> None:
     This prevents excessive regeneration during slider interaction by
     waiting 0.3 seconds after the last change before updating.
     """
+    # pylint: disable=global-statement
+    global _preview_pending_object
+    _preview_pending_object = obj
+
     # Register new timer with debounce delay
-    bpy.app.timers.register(
-        execute_collision_preview_update, first_interval=COLLISION_PREVIEW_DEBOUNCE_DELAY
-    )
+    # Note: Multiple timers may be registered, but only the first one to find
+    # _preview_pending_object as not None will execute the update.
+    if not bpy.app.timers.is_registered(execute_collision_preview_update):
+        bpy.app.timers.register(
+            execute_collision_preview_update, first_interval=COLLISION_PREVIEW_DEBOUNCE_DELAY
+        )
 
 
-# NOTE: Timer callback cannot use @safe_execute because it doesn't receive (self, context)
 @typing.no_type_check
 def execute_collision_preview_update() -> None | float:
     """Execute the actual collision mesh update after debounce delay."""
@@ -75,7 +81,7 @@ def execute_collision_preview_update() -> None | float:
 
     # Regenerate collision mesh with new quality
     # The collision_type is stored on the collision_obj itself
-    collision_type = collision_obj.get("collision_geometry_type", "CONVEX_HULL")
+    collision_type = collision_obj.get("collision_geometry_type", "MESH")
     regenerate_collision_mesh(obj, str(collision_type), bpy.context)
 
     return None  # Don't repeat timer
@@ -88,7 +94,7 @@ def regenerate_collision_mesh(
 
     Args:
         link_obj: The link object (Empty)
-        collision_type: Type of collision ("AUTO", "BOX", "SPHERE", "CYLINDER", "CONVEX_HULL")
+        collision_type: Type of collision ("AUTO", "BOX", "SPHERE", "CYLINDER", "MESH")
         context: Blender context
     """
     if (
@@ -107,11 +113,17 @@ def regenerate_collision_mesh(
 
     # Delete existing collision meshes for this link
     existing_collisions = [c for c in link_obj.children if "_collision" in c.name.lower()]
-    for col_obj in existing_collisions:
-        bpy.data.objects.remove(col_obj, do_unlink=True)
+    hide_viewport = True
+    if existing_collisions:
+        # Preserve visibility of the first existing collision
+        hide_viewport = existing_collisions[0].hide_viewport
+        for col_obj in existing_collisions:
+            bpy.data.objects.remove(col_obj, do_unlink=True)
 
     # Create new collision
-    create_collision_for_link(link_obj, collision_type, context)
+    new_col = create_collision_for_link(link_obj, collision_type, context)
+    if new_col:
+        new_col.hide_viewport = hide_viewport
 
 
 def create_collision_for_link(
@@ -124,7 +136,7 @@ def create_collision_for_link(
 
     Args:
         link_obj: The link object (Empty)
-        collision_type: Type of collision ("AUTO", "BOX", "SPHERE", "CYLINDER", "CONVEX_HULL")
+        collision_type: Type of collision ("AUTO", "BOX", "SPHERE", "CYLINDER", "MESH")
         context: Blender context
 
     Returns:
@@ -153,13 +165,13 @@ def create_collision_for_link(
 
         # Determine collision type
         if collision_type == "AUTO":
-            # For multiple visuals, always use convex hull (compound collision)
+            # For multiple visuals, always use mesh simplification (compound collision)
             if len(visual_children) > 1:
-                collision_type = "CONVEX_HULL"
+                collision_type = "MESH"
             else:
                 # Single visual - try to detect primitive
                 detected = detect_primitive_type(visual_children[0])
-                collision_type = detected if detected else "CONVEX_HULL"
+                collision_type = detected if detected else "MESH"
 
         # Determine collision type and generate geometry
         local_offset = mathutils.Vector((0, 0, 0))
@@ -169,12 +181,10 @@ def create_collision_for_link(
                 visual_children[0], collision_type, link_name, context
             )
             reference_visual = visual_children[0]
-        else:  # CONVEX_HULL
+        else:  # MESH
             # Merge ALL visuals into compound collision (geometry is baked link-local)
-            collision_obj = _create_convex_hull_collision_compound(
-                visual_children, link_obj, context
-            )
-            # For compound hull, we use the link itself as the local reference frame
+            collision_obj = _create_mesh_collision_compound(visual_children, link_obj, context)
+            # For compound mesh, we use the link itself as the local reference frame
             # Since merged geometry is already in link-local coordinates, the local matrix must be Identity
             reference_visual = None
             local_offset = mathutils.Vector((0, 0, 0))
@@ -193,7 +203,7 @@ def create_collision_for_link(
                 reference_visual.matrix_local @ mathutils.Matrix.Translation(local_offset)
             )
         else:
-            # CONVEX HULL: Already baked link-local, just reset transforms
+            # MESH: Already baked link-local, just reset transforms
             collision_obj.matrix_parent_inverse.identity()
             collision_obj.matrix_local.identity()
 
@@ -275,7 +285,7 @@ def _merge_visual_meshes(
 
     This creates a compound mesh that represents all visual geometry in the
     LOCAL space of the link, which is then used to generate a single
-    accurate collision hull aligned with the link origin.
+    accurate collision mesh aligned with the link origin.
 
     Args:
         visual_objects: List of visual mesh objects to merge
@@ -361,10 +371,10 @@ def _merge_visual_meshes(
     return merged_obj
 
 
-def _create_convex_hull_collision_compound(
+def _create_mesh_collision_compound(
     visual_objects: list[bpy.types.Object], link_obj: bpy.types.Object, context: Context
 ) -> bpy.types.Object | None:
-    """Create compound convex hull collision from multiple visual meshes.
+    """Create compound simplified mesh collision from multiple visual meshes.
 
     This merges all visual children into a single collision mesh, following
     industry best practices (ROS, Gazebo, MoveIt).
@@ -375,7 +385,7 @@ def _create_convex_hull_collision_compound(
         context: Blender context
 
     Returns:
-        Collision object with compound convex hull
+        Collision object with compound simplified mesh
     """
     # Merge all visual meshes into compound mesh (baked relative to link)
     merged_obj = _merge_visual_meshes(visual_objects, link_obj, context)
@@ -387,11 +397,11 @@ def _create_convex_hull_collision_compound(
     old_hide_viewport = merged_obj.hide_viewport
     old_hide_render = merged_obj.hide_render
 
-    # Ensure merged_obj is visible and active for convex hull operation
+    # Ensure merged_obj is visible and active for mesh simplification
     merged_obj.hide_viewport = False
     merged_obj.hide_render = False
 
-    # Apply convex hull to the merged mesh
+    # Apply mesh simplification to the merged mesh
     vl = context.view_layer
     if vl:
         vl.objects.active = merged_obj
@@ -400,6 +410,17 @@ def _create_convex_hull_collision_compound(
     bpy.ops.mesh.select_all(action="SELECT")
     bpy.ops.mesh.convex_hull()
     bpy.ops.object.mode_set(mode="OBJECT")
+
+    # Apply decimation based on collision quality
+    lf = typing.cast(typing.Any, link_obj).linkforge
+    quality_ratio = lf.collision_quality / 100.0
+    if quality_ratio < 1.0:
+        decimate_mod = typing.cast(
+            bpy.types.DecimateModifier, merged_obj.modifiers.new(name="Decimate", type="DECIMATE")
+        )
+        decimate_mod.ratio = quality_ratio
+        decimate_mod.decimate_type = "COLLAPSE"
+        bpy.ops.object.modifier_apply(modifier=decimate_mod.name)
 
     # Restore properties
     if merged_obj:
@@ -411,7 +432,7 @@ def _create_convex_hull_collision_compound(
             merged_obj.data.materials.clear()
 
     # Strict Alignment Parenting
-    # For Convex Hull, we align with the link origin because geometry is already local
+    # For Mesh (Simplified), we align with the link origin because geometry is already local
     if merged_obj:
         merged_obj.parent = link_obj
         merged_obj.matrix_parent_inverse.identity()
@@ -424,7 +445,7 @@ def _create_convex_hull_collision_compound(
         merged_obj.hide_render = old_hide_render
 
         # Persist collision type for UI consistency
-        merged_obj["collision_geometry_type"] = "CONVEX_HULL"
+        merged_obj["collision_geometry_type"] = "MESH"
 
         # Ensure it's in the same collection
         for collection in merged_obj.users_collection:
@@ -437,7 +458,7 @@ def _create_convex_hull_collision_compound(
     link_obj.select_set(True)
     vl = context.view_layer
     if vl:
-        vl.objects.active = merged_obj
+        vl.objects.active = link_obj
 
     return merged_obj
 
@@ -556,7 +577,12 @@ def calculate_inertia_for_link(link_obj: bpy.types.Object) -> bool:
 
 
 class LINKFORGE_OT_add_empty_link(Operator):
-    """Add a new robot link frame (virtual link) at 3D cursor"""
+    """Add a new robot link frame (virtual link) at the 3D cursor.
+
+    This operator creates a new Blender Empty object configured as a
+    LinkForge Robot Link at the current cursor position, initializing
+    standard visual axes and link property defaults.
+    """
 
     bl_idname = "linkforge.add_empty_link"
     bl_label = "Add Empty Link"
@@ -617,7 +643,12 @@ class LINKFORGE_OT_add_empty_link(Operator):
 
 
 class LINKFORGE_OT_create_link_from_mesh(Operator):
-    """Create a robot link from selected mesh object"""
+    """Create a robot link from a selected mesh object.
+
+    This operator converts a standard Blender mesh into a LinkForge Robot
+    Link by creating a parent Empty frame and establishing the required
+    hierarchy and naming conventions for URDF export.
+    """
 
     bl_idname = "linkforge.create_link_from_mesh"
     bl_label = "Create Link from Mesh"
@@ -750,7 +781,12 @@ class LINKFORGE_OT_create_link_from_mesh(Operator):
 
 
 class LINKFORGE_OT_generate_collision(Operator):
-    """Generate collision geometry from visual geometry"""
+    """Generate collision geometry from visual geometry for the active link.
+
+    This operator analyzes the visual mesh(es) of the selected link and
+    automatically generates simplified collision geometry (primitive or mesh)
+    based on the specified collision type.
+    """
 
     bl_idname = "linkforge.generate_collision"
     bl_label = "Generate Collision"
@@ -763,11 +799,19 @@ class LINKFORGE_OT_generate_collision(Operator):
         name="Collision Type",
         description="Type of collision geometry to generate",
         items=[
-            ("AUTO", "Auto-Detect", "Automatically detect primitive shape or use convex hull"),
+            (
+                "AUTO",
+                "Auto-Detect",
+                "Automatically detect primitive shape or use mesh simplification",
+            ),
             ("BOX", "Bounding Box", "Use axis-aligned bounding box"),
             ("SPHERE", "Bounding Sphere", "Use bounding sphere"),
-            ("CYLINDER", "Bounding Cylinder", "Use bounding cylinder"),
-            ("CONVEX_HULL", "Convex Hull", "Generate convex hull from mesh"),
+            ("CYLINDER", "Bounding Cylinder", "Cylindrical bounding volume around the mesh"),
+            (
+                "MESH",
+                "Mesh (Simplified)",
+                "Generate simplified mesh from visual geometry",
+            ),
         ],
         default="AUTO",
     )
@@ -857,7 +901,12 @@ class LINKFORGE_OT_generate_collision(Operator):
 
 
 class LINKFORGE_OT_generate_collision_all(Operator):
-    """Generate collision geometry for ALL links in the scene"""
+    """Generate collision geometry for all robot links in the scene.
+
+    This operator performs a batch collision generation for every object
+    marked as a LinkForge Robot Link, using each link's stored collision
+    type preferences.
+    """
 
     bl_idname = "linkforge.generate_collision_all"
     bl_label = "Generate All Collisions"
@@ -896,7 +945,11 @@ class LINKFORGE_OT_generate_collision_all(Operator):
 
 
 class LINKFORGE_OT_toggle_collision_visibility(Operator):
-    """Toggle collision geometry visibility in viewport"""
+    """Toggle collision geometry visibility in the 3D viewport.
+
+    This operator recursively toggles the visibility state of all collision
+    mesh children for the selected robot link(s).
+    """
 
     bl_idname = "linkforge.toggle_collision_visibility"
     bl_label = "Toggle Collision Visibility"
@@ -955,7 +1008,12 @@ class LINKFORGE_OT_toggle_collision_visibility(Operator):
 
 
 class LINKFORGE_OT_calculate_inertia(Operator):
-    """Calculate inertia tensor from object geometry"""
+    """Calculate the inertia tensor from link geometry and mass.
+
+    This operator utilizes the Core inertia calculator to derive the
+    moment of inertia and center of mass for the selected link based on its
+    visual and collision volumes.
+    """
 
     bl_idname = "linkforge.calculate_inertia"
     bl_label = "Calculate Inertia"
@@ -1014,7 +1072,12 @@ class LINKFORGE_OT_calculate_inertia(Operator):
 
 
 class LINKFORGE_OT_calculate_inertia_all(Operator):
-    """Calculate inertia for ALL links in the scene"""
+    """Calculate the inertia tensor for all robot links in the scene.
+
+    This operator performs a batch inertia calculation for every LinkForge
+    Robot Link, updating their mass and inertial properties based on their
+    active geometry.
+    """
 
     bl_idname = "linkforge.calculate_inertia_all"
     bl_label = "Calculate All Inertias"

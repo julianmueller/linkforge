@@ -328,7 +328,7 @@ class TestURDFParser:
         assert rc.name == "System"
         assert rc.type == "system"
         assert rc.hardware_plugin == "mock_components/GenericSystem"
-        assert rc.parameters["hardware.ip"] == "192.168.1.1"
+        assert rc.parameters["ip"] == "192.168.1.1"
         assert len(rc.joints) == 1
         assert rc.joints[0].name == "j1"
         assert "position" in rc.joints[0].command_interfaces
@@ -860,7 +860,7 @@ class TestURDFParser:
             parse_origin,
         )
 
-        # 1. Parse Origin with values (lines 86-92)
+        # 1. Parse Origin with values
         xml = '<origin xyz="1 2 3" rpy="0.1 0.2 0.3"/>'
         origin = parse_origin(ET.fromstring(xml))
         assert origin.xyz.x == 1.0
@@ -950,15 +950,15 @@ class TestURDFParser:
         assert parse_geometry(elem) is None
 
         # 2. Geometry Errors
-        # Cylinder invalid length (line 137)
+        # Cylinder invalid length
         xml = '<geometry><cylinder radius="1" length="-1"/></geometry>'
         assert parse_geometry(ET.fromstring(xml)) is None
 
-        # Mesh missing filename (line 161)
+        # Mesh missing filename
         xml = "<geometry><mesh/></geometry>"
         assert parse_geometry(ET.fromstring(xml)) is None
 
-        # Mesh negative scale (line 210)
+        # Mesh negative scale
         xml = '<geometry><mesh filename="f.stl" scale="-1 1 1"/></geometry>'
         assert parse_geometry(ET.fromstring(xml)) is None
 
@@ -996,7 +996,7 @@ class TestURDFParser:
         with pytest.raises(RobotParserError, match="Failed to parse"):
             parser.parse_string("<robot>unclosed tags")
 
-        # 7. Joint with explicit Axis (line 395)
+        # 7. Joint with explicit Axis
         xml = '<joint name="j1" type="continuous"><parent link="p"/><child link="c"/><axis xyz="0 1 0"/></joint>'
         joint = parse_joint(ET.fromstring(xml))
         assert joint.axis.y == 1.0
@@ -1311,7 +1311,7 @@ class TestURDFParserFileProtectionAndSensorCoverage:
         robot = parser.parse_string(xml)
         assert len(robot.ros2_controls) == 1
         ctrl = robot.ros2_controls[0]
-        assert "hardware.joints" in ctrl.parameters
+        assert "joints" in ctrl.parameters
 
     def test_ros2_control_joint_without_interfaces_is_not_added(self):
         """A ros2_control joint with no command or state interfaces is skipped."""

@@ -113,15 +113,18 @@ def create_material_from_color(color: Color, name: str) -> bpy.types.Material | 
 
 
 def create_primitive_mesh(geometry: typing.Any, name: str) -> bpy.types.Object | None:
-    """Create Blender mesh object from primitive geometry.
+    """Create a Blender mesh object from primitive geometry.
+
+    This function generates native Blender mesh primitives (Cube, Cylinder,
+    Sphere) based on the Core geometry model and applies the correct
+    dimensions and URDF-specific metadata tags.
 
     Args:
-        geometry: Box, Cylinder, or Sphere
-        name: Object name
+        geometry: One of Box, Cylinder, or Sphere models.
+        name: Name to assign to the created Blender object.
 
     Returns:
-        Blender Object or None
-
+        The created Blender Object or None if creation failed.
     """
     # Deselect all first
     bpy.ops.object.select_all(action="DESELECT")
@@ -174,15 +177,17 @@ def create_primitive_mesh(geometry: typing.Any, name: str) -> bpy.types.Object |
 
 
 def import_mesh_file(mesh_path: Path, name: str) -> bpy.types.Object | None:
-    """Import mesh file into Blender.
+    """Import an external mesh file into the Blender scene.
+
+    Supported formats include STL, OBJ, and GLB. This function utilizes
+    modern Blender WM operators for improved performance and stability.
 
     Args:
-        mesh_path: Path to mesh file (OBJ, STL, etc.)
-        name: Object name
+        mesh_path: Absolute path to the mesh file.
+        name: Name to assign to the imported object.
 
     Returns:
-        Blender Object or None
-
+        The imported Blender Object or None if import failed.
     """
     if not mesh_path.exists():
         logger.error(f"Mesh file not found: {mesh_path}")
@@ -608,9 +613,9 @@ def create_link_object(
             if collision_geom_type in ("BOX", "CYLINDER", "SPHERE"):
                 props.collision_type = collision_geom_type
             elif collision_geom_type == "MESH":
-                # For mesh collisions, default to CONVEX_HULL
-                # (most imported mesh collisions are convex hulls or simplified meshes)
-                props.collision_type = "CONVEX_HULL"
+                # For mesh collisions, default to MESH (Simplified)
+                # (most imported mesh collisions are simplified meshes)
+                props.collision_type = "MESH"
 
         # Enable material export if imported URDF has material
         if link.visuals and link.visuals[0].material:
@@ -942,12 +947,18 @@ def setup_scene_for_robot(scene: bpy.types.Scene, robot: Robot) -> None:
     # Populate centralized ROS2 Control
     if robot.ros2_controls:
         lp = scene.linkforge  # type: ignore[attr-defined]
-        # Use direct scene access to ensure persistence in tests
         lp.use_ros2_control = True
         control = robot.ros2_controls[0]
         lp.ros2_control_name = control.name
         lp.ros2_control_type = control.type
         lp.hardware_plugin = control.hardware_plugin
+
+        # Map global parameters
+        lp.ros2_control_parameters.clear()
+        for key, value in control.parameters.items():
+            param_item = lp.ros2_control_parameters.add()
+            param_item.name = key
+            param_item.value = value
 
         # Map joints
         lp.ros2_control_joints.clear()
@@ -961,32 +972,34 @@ def setup_scene_for_robot(scene: bpy.types.Scene, robot: Robot) -> None:
             item.state_velocity = "velocity" in rc_joint.state_interfaces
             item.state_effort = "effort" in rc_joint.state_interfaces
 
-    # Gazebo Elements (Blender properties only support one main gazebo plugin name currently)
+            # Map joint-level parameters
+            item.parameters.clear()
+            for key, value in rc_joint.parameters.items():
+                param_item = item.parameters.add()
+                param_item.name = key
+                param_item.value = value
+    # Master reset of ROS2 Control / Gazebo state if not present in robot
+    if not robot.ros2_controls and hasattr(scene, "linkforge"):
+        lp = scene.linkforge
+        lp.use_ros2_control = False
+        lp.ros2_control_joints.clear()
+        lp.ros2_control_parameters.clear()
+        lp.gazebo_plugin_name = "gz_ros2_control::GazeboSimROS2ControlPlugin"  # Default
+        lp.controllers_yaml_path = ""
+
+    # Map Gazebo simulation settings if present
     if robot.gazebo_elements and hasattr(scene, "linkforge"):
+        plugin_found = False
         for elem in robot.gazebo_elements:
             for plugin in elem.plugins:
-                # Map to the single gazebo_plugin_name field if it looks like the ros2_control one
                 if "ros2_control" in plugin.name.lower():
                     scene.linkforge.gazebo_plugin_name = plugin.name
+                    if "parameters" in plugin.parameters:
+                        scene.linkforge.controllers_yaml_path = plugin.parameters["parameters"]
+                    plugin_found = True
                     break
-
-    # Check for legacy Gazebo ros2_control plugin settings
-    if hasattr(robot, "gazebo_elements") and robot.gazebo_elements:
-        for element in robot.gazebo_elements:
-            for plugin in element.plugins:
-                if "ros2_control" in plugin.name.lower():
-                    if hasattr(scene, "linkforge"):
-                        scene.linkforge.gazebo_plugin_name = plugin.name
-                        if "parameters" in plugin.parameters:
-                            scene.linkforge.controllers_yaml_path = plugin.parameters["parameters"]
-                    break
-            else:
-                continue
-            break
-
-    else:
-        if hasattr(scene, "linkforge"):
-            scene.linkforge.use_ros2_control = False
+            if plugin_found:
+                break
 
 
 def import_robot_to_scene(robot: Robot, urdf_path: Path, context: bpy.types.Context) -> bool:

@@ -116,11 +116,12 @@ def test_ros2_control_logic_gaps(clean_scene):
     item.state_velocity = False
     item.state_effort = False
 
-    core = blender_ros2_control_to_core(scene.linkforge)
-    assert core is not None
-    # Verify defaults are hit for command_interfaces (lines 1294-1295)
-    assert core.joints[0].command_interfaces == ["position"]
-    assert core.joints[0].state_interfaces == ["position"]
+    ctrl = blender_ros2_control_to_core(scene.linkforge)
+    assert ctrl is not None
+    # Verify defaults are hit for command_interfaces
+    # cmd_ifs should default to position because state_ifs is not empty
+    assert ctrl.joints[0].command_interfaces == ["position"]
+    assert ctrl.joints[0].state_interfaces == ["position"]
 
 
 def test_inertia_mesh_fallback(clean_scene):
@@ -208,7 +209,7 @@ def test_material_default_fallback(clean_scene):
     props = mock.MagicMock()
     props.use_material = True
 
-    # No material slots -> hits line 440
+    # No material slots
     mat = get_object_material(o, props)
     assert mat.color.r == 0.8
 
@@ -219,7 +220,7 @@ def test_link_conversion_edge_cases(clean_scene):
     bpy.context.collection.objects.link(o)
     o.linkforge.is_robot_link = True
 
-    # 1. urdf_name on child (hits line 498)
+    # 1. urdf_name on child
     child_mesh = bpy.data.meshes.new("VMesh")
     import bmesh
 
@@ -236,7 +237,7 @@ def test_link_conversion_edge_cases(clean_scene):
     core = blender_link_to_core_with_origin(o)
     assert core.visuals[0].name == "custom_vis"
 
-    # 2. non-robot link (hits line 468)
+    # 2. non-robot link
     o_non = bpy.data.objects.new("NonRobot", None)
     o_non.linkforge.is_robot_link = False
     assert blender_link_to_core_with_origin(o_non) is None
@@ -259,7 +260,7 @@ def test_extract_mesh_triangles_none():
 
 
 def test_ros2_control_state_default(clean_scene):
-    """Hit line 1297 (state_ifs default)."""
+    """Hit state_ifs default."""
     scene = bpy.context.scene
     scene.linkforge.ros2_control_name = "test"
     item = scene.linkforge.ros2_control_joints.add()
@@ -271,3 +272,59 @@ def test_ros2_control_state_default(clean_scene):
 
     core = blender_ros2_control_to_core(scene.linkforge)
     assert core.joints[0].state_interfaces == ["position"]
+
+
+def test_ros2_control_sensor_strips_commands(clean_scene):
+    """Verify that sensor-type control systems strip command interfaces during export."""
+    scene = bpy.context.scene
+    scene.linkforge.ros2_control_name = "test_sensor"
+    scene.linkforge.ros2_control_type = "sensor"
+
+    item = scene.linkforge.ros2_control_joints.add()
+    item.name = "joint1"
+    # Select command interfaces, which should be stripped by the adapter
+    item.cmd_position = True
+    item.cmd_velocity = True
+    # Configure state interfaces explicitly
+    item.state_position = True
+    item.state_velocity = False
+    item.state_effort = False
+
+    core = blender_ros2_control_to_core(scene.linkforge)
+    assert core is not None
+    assert core.type == "sensor"
+    # Verify command interfaces were stripped
+    assert len(core.joints[0].command_interfaces) == 0
+    # Verify state interface was preserved
+    assert core.joints[0].state_interfaces == ["position"]
+
+
+def test_ros2_control_actuator_strips_extra_joints(clean_scene):
+    """Verify that 'actuator' type systems strip extra joints and log a warning."""
+    scene = bpy.context.scene
+    robot_props = scene.linkforge
+    robot_props.use_ros2_control = True
+    robot_props.ros2_control_type = "actuator"
+
+    # Add two joints to the control configuration
+    j1 = robot_props.ros2_control_joints.add()
+    j1.name = "joint1"
+    j1.cmd_position = True
+
+    j2 = robot_props.ros2_control_joints.add()
+    j2.name = "joint2"
+    j2.cmd_position = True
+
+    with mock.patch("linkforge.blender.adapters.blender_to_core.logger") as mock_logger:
+        core = blender_ros2_control_to_core(scene.linkforge)
+
+    # Should only have one joint
+    assert core is not None
+    assert core.type == "actuator"
+    assert len(core.joints) == 1
+    assert core.joints[0].name == "joint1"
+
+    # Should have logged a warning
+    assert mock_logger.warning.called
+    args, _ = mock_logger.warning.call_args
+    assert "limited to exactly one joint" in args[0]

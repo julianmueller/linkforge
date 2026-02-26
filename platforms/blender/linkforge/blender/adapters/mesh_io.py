@@ -18,21 +18,22 @@ logger = get_logger(__name__)
 
 
 def export_mesh_stl(obj: Any, filepath: Path) -> bool:
-    """Export Blender object to STL file.
+    """Export a Blender object to an STL file.
+
+    This function utilizes the modern Blender WM STL exporter, ensuring
+    correct axis orientations (Y-forward, Z-up) for ROS 2 compatibility.
 
     Args:
-        obj: Blender Object to export
-        filepath: Path where STL file should be saved
+        obj: The Blender mesh object to export.
+        filepath: Target filesystem path for the STL file.
 
     Returns:
-        True if export succeeded, False otherwise
-
+        True if the export completed successfully, False otherwise.
     """
     if obj is None:
         return False
 
-    # CRITICAL: Must unhide BEFORE selection for some operators/context to work
-    # Store visibility state before modifying
+    # Ensure object is visible before selection for reliable Blender context.
     was_hidden = obj.hide_viewport
 
     # Ensure parent directory exists
@@ -75,15 +76,17 @@ def export_mesh_stl(obj: Any, filepath: Path) -> bool:
 
 
 def export_mesh_obj(obj: Any, filepath: Path) -> bool:
-    """Export Blender object to OBJ file (with MTL material).
+    """Export a Blender object to an OBJ file with associated MTL materials.
+
+    This function ensures that materials are correctly exported alongside
+    the geometry, maintaining visual fidelity in the target URDF.
 
     Args:
-        obj: Blender Object to export
-        filepath: Path where OBJ file should be saved
+        obj: The Blender mesh object to export.
+        filepath: Target filesystem path for the OBJ file.
 
     Returns:
-        True if export succeeded, False otherwise
-
+        True if the export completed successfully, False otherwise.
     """
     if obj is None:
         return False
@@ -95,7 +98,7 @@ def export_mesh_obj(obj: Any, filepath: Path) -> bool:
         filepath.parent.mkdir(parents=True, exist_ok=True)
 
         # Deselect all and select only target object
-        # CRITICAL: Must unhide BEFORE selection
+        # Selection requires object visibility
         obj.hide_viewport = False
 
         bpy.ops.object.select_all(action="DESELECT")
@@ -131,15 +134,17 @@ def export_mesh_obj(obj: Any, filepath: Path) -> bool:
 
 
 def create_simplified_mesh(obj: Any, decimation_ratio: float) -> Any | None:
-    """Create a simplified copy of mesh using decimation.
+    """Create a simplified mesh copy using Blender's Decimate modifier.
+
+    This function is primarily used to generate lightweight collision geometry
+    from high-fidelity visual meshes, reducing physics computation overhead.
 
     Args:
-        obj: Blender Object to simplify
-        decimation_ratio: Target ratio of faces to keep (0.0-1.0)
+        obj: The source Blender mesh object.
+        decimation_ratio: The target triangle count ratio (0.0 to 1.0).
 
     Returns:
-        Simplified Blender Object or None
-
+        A new Blender object with the simplified mesh, or None if failed.
     """
     if obj is None or obj.type != "MESH":
         return None
@@ -214,7 +219,7 @@ def export_mesh_glb(obj: Any, filepath: Path) -> bool:
         filepath.parent.mkdir(parents=True, exist_ok=True)
 
         # Deselect all and select only target object
-        # CRITICAL: Must unhide BEFORE selection
+        # Selection requires object visibility
         obj.hide_viewport = False
 
         bpy.ops.object.select_all(action="DESELECT")

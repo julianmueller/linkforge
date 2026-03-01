@@ -483,9 +483,7 @@ def blender_link_to_core_with_origin(
     link_name = props.link_name if props.link_name else obj.name
 
     # Get mesh format from robot props
-    mesh_format = "STL"
-    if robot_props and hasattr(robot_props, "mesh_format"):
-        mesh_format = robot_props.mesh_format
+    mesh_format = robot_props.mesh_format if robot_props else "STL"
 
     # Find all visual and collision geometry objects (children with _visual or _collision in name)
     visuals: list[Visual] = []
@@ -1171,9 +1169,11 @@ def scene_to_robot(
                     if robot_props.controllers_yaml_path:
                         params["parameters"] = robot_props.controllers_yaml_path
 
+                    # Map UI string directly. Conventionally users input the exact plugin tag content,
+                    # e.g., gz_ros2_control::GazeboSimROS2ControlPlugin, or libgazebo_ros2_control.so.
                     gazebo_plugin = GazeboPlugin(
                         name="gazebo_ros2_control",
-                        filename="libgz_ros2_control-system.so",  # Default filename for simulation
+                        filename=robot_props.gazebo_plugin_name,
                         parameters=params,
                     )
                     # Note: We wrap the plugin in a GazeboElement without a reference (global)
@@ -1379,10 +1379,13 @@ def blender_ros2_control_to_core(props: Any) -> Ros2Control | None:
         # Extract joint-level parameters
         parameters = {p.name: p.value for p in item.parameters if p.name}
 
+        # Determine the correct joint name
+        joint_name = item.joint_obj.linkforge_joint.joint_name if item.joint_obj else item.name
+
         if cmd_ifs or state_ifs:
             joints.append(
                 Ros2ControlJoint(
-                    name=item.name,
+                    name=joint_name,
                     command_interfaces=cmd_ifs,
                     state_interfaces=state_ifs,
                     parameters=parameters,

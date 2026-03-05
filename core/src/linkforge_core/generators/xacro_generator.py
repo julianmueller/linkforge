@@ -7,7 +7,6 @@ and file splitting for maintainability.
 
 from __future__ import annotations
 
-import contextlib
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from pathlib import Path
@@ -439,7 +438,7 @@ class XACROGenerator(URDFGenerator):
             elif isinstance(geom, Sphere):
                 parts.extend([f"{geom.radius:.3f}"])
             elif isinstance(geom, Mesh):
-                parts.append(str(geom.filepath))
+                parts.append(str(geom.resource))
 
             # Include visual origin (Critical for transform fidelity)
             if visual.origin:
@@ -468,7 +467,7 @@ class XACROGenerator(URDFGenerator):
             elif isinstance(geom, Sphere):
                 parts.extend([f"{geom.radius:.3f}"])
             elif isinstance(geom, Mesh):
-                parts.append(str(geom.filepath))
+                parts.append(str(geom.resource))
 
             # Include collision origin
             if collision.origin:
@@ -702,13 +701,12 @@ class XACROGenerator(URDFGenerator):
             )
 
         elif isinstance(geometry, Mesh):
-            # Mesh handling (same as parent class)
-            mesh_path = geometry.filepath
-            if self.urdf_path and mesh_path.is_absolute():
-                with contextlib.suppress(ValueError):
-                    mesh_path = mesh_path.relative_to(self.urdf_path.parent)
+            from ..utils.path_utils import get_export_path
 
-            attrib: dict[str, str] = {"filename": str(mesh_path)}
+            urdf_dir = self.urdf_path.parent if self.urdf_path else None
+            export_path = get_export_path(geometry.resource, relative_to=urdf_dir)
+
+            attrib: dict[str, str] = {"filename": export_path}
             if geometry.scale.x != 1.0 or geometry.scale.y != 1.0 or geometry.scale.z != 1.0:
                 scale_str = format_vector(geometry.scale.x, geometry.scale.y, geometry.scale.z)
                 attrib["scale"] = scale_str

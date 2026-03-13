@@ -665,7 +665,9 @@ def blender_link_to_core_with_origin(
         )
         inertial = Inertial(mass=props.mass, origin=inertial_origin, inertia=inertia_tensor)
 
-    return Link(name=link_name, visuals=visuals, collisions=collisions, inertial=inertial)
+    return Link(
+        name=link_name, initial_visuals=visuals, initial_collisions=collisions, inertial=inertial
+    )
 
 
 def blender_joint_to_core(obj: Any, scene: Any) -> Joint | None:
@@ -1071,15 +1073,15 @@ def scene_to_robot(
     depsgraph = context.evaluated_depsgraph_get()
     conversion_errors: list[str] = []
 
-    # Step 1: Categorize scene objects
+    # Categorize scene objects
     link_objects, joint_objects, sensor_objects, transmission_objects, joints_map, root_link = (
         _categorize_scene_objects(scene)
     )
 
-    # Step 2: Calculate link coordinate frames
+    # Calculate link coordinate frames
     link_frames = _calculate_link_frames(link_objects, joints_map, root_link)
 
-    # Step 3: Process Links
+    # Process Links
     for _link_name, obj in link_objects.items():
         try:
             # Create link

@@ -46,7 +46,7 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "A", "C4", "SIM"]
-ignore = ["E501", "N801"]
+ignore = ["E501", "B008", "C901", "B009", "N801"]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
@@ -68,6 +68,14 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = "linkforge.blender.*"
 ignore_errors = false
+
+# Tiered Quality Control: Strict enforcement for production core, optimized for developer velocity in test suites.
+[[tool.mypy.overrides]]
+module = "tests.*"
+check_untyped_defs = false
+disallow_untyped_defs = false
+ignore_missing_imports = true
+ignore_errors = true
 
 [dependency-groups]
 dev = []

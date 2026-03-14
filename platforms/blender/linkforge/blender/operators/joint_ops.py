@@ -6,12 +6,21 @@ import contextlib
 import typing
 
 import bpy
-from bpy.types import Context, Operator
 
 from ..properties.link_props import sanitize_urdf_name
 from ..utils.context import context_and_mode_guard
-from ..utils.decorators import safe_execute
+from ..utils.decorators import OperatorReturn, safe_execute
 from ..utils.scene_utils import clear_stats_cache
+
+if typing.TYPE_CHECKING:
+    from bpy.types import Context, Operator
+
+    from ..properties.joint_props import JointPropertyGroup
+    from ..properties.link_props import LinkPropertyGroup
+else:
+    # Runtime fallback for mock environments where bpy.types might be partially loaded.
+    Context = typing.Any
+    Operator = getattr(getattr(bpy, "types", object), "Operator", object)
 
 
 class LINKFORGE_OT_create_joint(Operator):
@@ -41,16 +50,16 @@ class LINKFORGE_OT_create_joint(Operator):
         # Allow if object is a link or a child of a link (visual mesh)
         return bool(
             hasattr(obj, "linkforge")
-            and typing.cast(typing.Any, obj).linkforge.is_robot_link
+            and typing.cast("LinkPropertyGroup", getattr(obj, "linkforge")).is_robot_link
             or (
                 obj.parent
                 and hasattr(obj.parent, "linkforge")
-                and typing.cast(typing.Any, obj.parent).linkforge.is_robot_link
+                and typing.cast("LinkPropertyGroup", getattr(obj.parent, "linkforge")).is_robot_link
             )
         )
 
     @safe_execute
-    def execute(self, context: Context) -> set[str]:
+    def execute(self, context: Context) -> OperatorReturn:
         """Execute the operator."""
         obj = context.active_object
 
@@ -65,7 +74,7 @@ class LINKFORGE_OT_create_joint(Operator):
             self.report({"ERROR"}, "No valid robot link found")
             return {"CANCELLED"}
 
-        link_props = typing.cast(typing.Any, link_obj).linkforge
+        link_props = typing.cast("LinkPropertyGroup", getattr(link_obj, "linkforge"))
 
         # Get preferred empty size from addon preferences
         from ..preferences import get_addon_prefs
@@ -88,7 +97,7 @@ class LINKFORGE_OT_create_joint(Operator):
             joint_empty = context.active_object
             if not joint_empty:
                 return {"CANCELLED"}
-            joint_empty.name = f"{typing.cast(typing.Any, link_obj).linkforge.link_name}_joint"
+            joint_empty.name = f"{typing.cast('LinkPropertyGroup', getattr(link_obj, 'linkforge')).link_name}_joint"
             joint_empty.rotation_mode = "XYZ"
             joint_empty.rotation_euler = rotation
 
@@ -111,7 +120,7 @@ class LINKFORGE_OT_create_joint(Operator):
         )
 
         # Set default joint joint_type
-        joint_props = typing.cast(typing.Any, joint_empty).linkforge_joint
+        joint_props = typing.cast("JointPropertyGroup", getattr(joint_empty, "linkforge_joint"))
         joint_props.joint_type = "REVOLUTE"
 
         # Enable limits by default for REVOLUTE joints (they typically need them)
@@ -156,11 +165,11 @@ class LINKFORGE_OT_delete_joint(Operator):
             obj
             and obj.type == "EMPTY"
             and hasattr(obj, "linkforge_joint")
-            and typing.cast(typing.Any, obj).linkforge_joint.is_robot_joint
+            and typing.cast("JointPropertyGroup", getattr(obj, "linkforge_joint")).is_robot_joint
         )
 
     @safe_execute
-    def execute(self, context: Context) -> set[str]:
+    def execute(self, context: Context) -> OperatorReturn:
         """Execute the operator."""
         obj = context.active_object
         if not obj:
@@ -220,16 +229,16 @@ class LINKFORGE_OT_auto_detect_parent_child(Operator):
         return bool(
             obj.type == "EMPTY"
             and hasattr(obj, "linkforge_joint")
-            and typing.cast(typing.Any, obj).linkforge_joint.is_robot_joint
+            and typing.cast("JointPropertyGroup", getattr(obj, "linkforge_joint")).is_robot_joint
         )
 
     @safe_execute
-    def execute(self, context: Context) -> set[str]:
+    def execute(self, context: Context) -> OperatorReturn:
         """Execute the operator."""
         joint_empty = context.active_object
         if not joint_empty:
             return {"CANCELLED"}
-        props = typing.cast(typing.Any, joint_empty).linkforge_joint
+        props = typing.cast("JointPropertyGroup", getattr(joint_empty, "linkforge_joint"))
 
         # Find nearest links based on distance
         scene = context.scene

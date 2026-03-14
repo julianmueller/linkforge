@@ -4,9 +4,17 @@ import typing
 
 import bpy
 from bpy.props import IntProperty, StringProperty
-from bpy.types import Context, Operator
 
-from ..utils.decorators import safe_execute
+from ..utils.decorators import OperatorReturn, safe_execute
+
+if typing.TYPE_CHECKING:
+    from bpy.types import Context, Operator
+
+    from ..properties.robot_props import RobotPropertyGroup
+else:
+    # Runtime fallback for mock environments where bpy.types might be partially loaded.
+    Context = typing.Any
+    Operator = getattr(getattr(bpy, "types", object), "Operator", object)
 
 
 class LINKFORGE_OT_add_ros2_control_joint(Operator):
@@ -37,7 +45,7 @@ class LINKFORGE_OT_add_ros2_control_joint(Operator):
         return hasattr(context.scene, "linkforge")
 
     @safe_execute
-    def execute(self, context: Context) -> set[str]:
+    def execute(self, context: Context) -> OperatorReturn:
         """Execute the operator.
 
         Args:
@@ -49,7 +57,7 @@ class LINKFORGE_OT_add_ros2_control_joint(Operator):
         scene = context.scene
         if not scene:
             return {"CANCELLED"}
-        props = typing.cast(typing.Any, scene).linkforge
+        props = typing.cast("RobotPropertyGroup", getattr(scene, "linkforge"))
 
         # Find the target joint object we intend to add
         target_joint_obj = next(
@@ -123,7 +131,7 @@ class LINKFORGE_OT_remove_ros2_control_joint(Operator):
         return bool(props and len(props.ros2_control_joints) > 0)
 
     @safe_execute
-    def execute(self, context: Context) -> set[str]:
+    def execute(self, context: Context) -> OperatorReturn:
         """Execute the operator.
 
         Args:
@@ -134,7 +142,7 @@ class LINKFORGE_OT_remove_ros2_control_joint(Operator):
         """
         if not context.scene:
             return {"CANCELLED"}
-        props = typing.cast(typing.Any, context.scene).linkforge
+        props = typing.cast("RobotPropertyGroup", getattr(context.scene, "linkforge"))
         index = props.ros2_control_active_joint_index
 
         if 0 <= index < len(props.ros2_control_joints):
@@ -180,7 +188,7 @@ class LINKFORGE_OT_move_ros2_control_joint(Operator):
         return bool(props and len(props.ros2_control_joints) > 1)
 
     @safe_execute
-    def execute(self, context: Context) -> set[str]:
+    def execute(self, context: Context) -> OperatorReturn:
         """Execute the operator.
 
         Args:
@@ -191,7 +199,7 @@ class LINKFORGE_OT_move_ros2_control_joint(Operator):
         """
         if not context.scene:
             return {"CANCELLED"}
-        props = typing.cast(typing.Any, context.scene).linkforge
+        props = typing.cast("RobotPropertyGroup", getattr(context.scene, "linkforge"))
         index = props.ros2_control_active_joint_index
         new_index = index
 
@@ -234,7 +242,7 @@ class LINKFORGE_OT_add_ros2_control_parameter(Operator):
         return hasattr(context.scene, "linkforge")
 
     @safe_execute
-    def execute(self, context: Context) -> set[str]:
+    def execute(self, context: Context) -> OperatorReturn:
         """Execute the addition of a parameter.
 
         Args:
@@ -244,7 +252,7 @@ class LINKFORGE_OT_add_ros2_control_parameter(Operator):
             Set containing the execution state.
         """
         scene = context.scene
-        props = typing.cast(typing.Any, scene).linkforge
+        props = typing.cast("RobotPropertyGroup", getattr(scene, "linkforge"))
 
         if self.target == "GLOBAL":
             param = props.ros2_control_parameters.add()
@@ -290,7 +298,7 @@ class LINKFORGE_OT_remove_ros2_control_parameter(Operator):
         return hasattr(context.scene, "linkforge")
 
     @safe_execute
-    def execute(self, context: Context) -> set[str]:
+    def execute(self, context: Context) -> OperatorReturn:
         """Execute the removal of a parameter.
 
         Args:
@@ -300,7 +308,7 @@ class LINKFORGE_OT_remove_ros2_control_parameter(Operator):
             Set containing the execution state.
         """
         scene = context.scene
-        props = typing.cast(typing.Any, scene).linkforge
+        props = typing.cast("RobotPropertyGroup", getattr(scene, "linkforge"))
 
         if self.target == "GLOBAL":
             items = props.ros2_control_parameters

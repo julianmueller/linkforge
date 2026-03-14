@@ -45,7 +45,7 @@ class LINKFORGE_PT_links(Panel):
             )
             return
 
-        props = typing.cast(typing.Any, obj).linkforge
+        props = getattr(obj, "linkforge")
 
         # Check if selected object is a visual/collision child of a link
         # If so, show parent link properties instead
@@ -53,14 +53,14 @@ class LINKFORGE_PT_links(Panel):
             obj
             and obj.parent
             and hasattr(obj.parent, "linkforge")
-            and typing.cast(typing.Any, obj.parent).linkforge.is_robot_link
+            and getattr(obj.parent, "linkforge").is_robot_link
             and props
             and not props.is_robot_link
             and ("_visual" in obj.name.lower() or "_collision" in obj.name.lower())
         ):
             # Switch to parent for property display (visual/collision elements only)
             obj = obj.parent
-            props = typing.cast(typing.Any, obj).linkforge
+            props = getattr(obj, "linkforge")
 
         # Check if selected object is already a link (edit mode vs create mode)
         is_link = props.is_robot_link if props else False
@@ -129,8 +129,12 @@ class LINKFORGE_PT_links(Panel):
 
             is_imported = typing.cast(bool, collision_obj.get("imported_from_urdf"))
 
-            # Show slider for meshes (only relevant for non-primitives)
-            if detected_type == "MESH":
+            # Show quality slider for mesh-based collisions.
+            # If the user explicitly selects MESH mode, we show the slider even if
+            # the current detection is a primitive to allow for mode switching.
+            if props.collision_type == "MESH" or (
+                props.collision_type == "AUTO" and detected_type == "MESH"
+            ):
                 box.separator()
                 row = box.row()
                 # Disable slider if imported from URDF (cannot be simplified via slider)

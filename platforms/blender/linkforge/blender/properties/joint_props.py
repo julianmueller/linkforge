@@ -8,7 +8,13 @@ from __future__ import annotations
 import typing
 
 import bpy
-from bpy.props import BoolProperty, EnumProperty, FloatProperty, PointerProperty, StringProperty
+from bpy.props import (
+    BoolProperty,
+    EnumProperty,
+    FloatProperty,
+    PointerProperty,
+    StringProperty,
+)
 from bpy.types import Context, PropertyGroup
 
 if typing.TYPE_CHECKING:
@@ -17,8 +23,12 @@ if typing.TYPE_CHECKING:
 from ..utils.property_helpers import find_property_owner
 
 
-def get_joint_name(self: typing.Any) -> str:
-    """Getter for joint_name - mirrors and sanitizes the Blender object name."""
+def get_joint_name(self: JointPropertyGroup) -> str:
+    """Getter for joint_name - returns the persistent URDF identity."""
+    # Prioritize the stored identity to avoid Blender's .001 suffixing
+    if self.urdf_name_stored:
+        return str(self.urdf_name_stored)
+
     if not self.id_data:
         return ""
 
@@ -27,8 +37,8 @@ def get_joint_name(self: typing.Any) -> str:
     return sanitize_urdf_name(str(self.id_data.name))
 
 
-def set_joint_name(self: typing.Any, value: str) -> None:
-    """Setter for joint_name - updates object name."""
+def set_joint_name(self: JointPropertyGroup, value: str) -> None:
+    """Setter for joint_name - updates persistent identity and object name."""
     if not value or not self.id_data:
         return
 
@@ -36,11 +46,16 @@ def set_joint_name(self: typing.Any, value: str) -> None:
 
     sanitized_name = sanitize_urdf_name(value)
 
+    # Store the persistent identity
+    self.urdf_name_stored = sanitized_name
+
+    # Update object name to match joint name
+    # Blender will handle collisions by appending suffixes, but our stored name persists
     if self.id_data.name != sanitized_name:
         self.id_data.name = sanitized_name
 
 
-def update_joint_hierarchy(self: typing.Any, context: Context) -> None:
+def update_joint_hierarchy(self: JointPropertyGroup, context: Context) -> None:
     """Update Blender object hierarchy when parent/child links change.
 
     Establishes hierarchy: parent_link → joint → child_link
@@ -64,6 +79,11 @@ def update_joint_hierarchy(self: typing.Any, context: Context) -> None:
     if parent_obj:
         # Parent the Joint to the Parent Link
         set_parent_keep_transform(joint_obj, parent_obj)
+
+        # Move to parent's collection (organization)
+        from ..utils.scene_utils import sync_object_collections
+
+        sync_object_collections(joint_obj, parent_obj)
     elif joint_obj.parent:
         # Clear parent (unparent joint) while preserving world position
         clear_parent_keep_transform(joint_obj)
@@ -87,7 +107,7 @@ def update_joint_hierarchy(self: typing.Any, context: Context) -> None:
                     break  # Only unparent one child
 
 
-def poll_robot_link(self: typing.Any, obj: bpy.types.Object) -> bool:
+def poll_robot_link(self: JointPropertyGroup, obj: bpy.types.Object) -> bool:
     """Filter to only allow robot link objects in pointer selection."""
     return bool(
         obj
@@ -96,7 +116,7 @@ def poll_robot_link(self: typing.Any, obj: bpy.types.Object) -> bool:
     )
 
 
-def poll_robot_joint(self: typing.Any, obj: bpy.types.Object) -> bool:
+def poll_robot_joint(self: JointPropertyGroup, obj: bpy.types.Object) -> bool:
     """Filter to only allow other robot joint objects in pointer selection."""
     if not obj or obj.type != "EMPTY":
         return False
@@ -120,6 +140,14 @@ class JointPropertyGroup(PropertyGroup):
         name="Is Robot Joint",
         description="Mark this Empty as a robot joint",
         default=False,
+    )
+
+    # Persistent URDF Identity
+    # Decouples logical URDF naming from physical Blender object names (resilient to .001 suffixes)
+    urdf_name_stored: StringProperty(  # type: ignore
+        name="URDF Name",
+        description="Persistent URDF name. Prevents mapping breakage if Blender renames the object",
+        default="",
     )
 
     joint_name: StringProperty(  # type: ignore

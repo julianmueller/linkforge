@@ -12,7 +12,7 @@ from bpy.props import (
     BoolProperty,
     EnumProperty,
     FloatProperty,
-    FloatVectorProperty,  # This was removed in the instruction, but is used later. Re-adding to maintain syntactical correctness.
+    FloatVectorProperty,
     PointerProperty,
     StringProperty,
 )
@@ -21,23 +21,30 @@ from bpy.types import Context, PropertyGroup
 from ...linkforge_core.utils.string_utils import sanitize_name as sanitize_urdf_name
 
 
-def get_link_name(self: bpy.types.PropertyGroup) -> str:
-    """Getter for link_name - mirrors and sanitizes the Blender object name."""
+def get_link_name(self: LinkPropertyGroup) -> str:
+    """Getter for link_name - returns the persistent URDF identity."""
+    # Prioritize the stored identity to avoid Blender's .001 suffixing
+    if self.urdf_name_stored:
+        return str(self.urdf_name_stored)
+
     if not self.id_data:
         return ""
-    return sanitize_urdf_name(self.id_data.name)
+    return sanitize_urdf_name(str(self.id_data.name))
 
 
-def set_link_name(self: bpy.types.PropertyGroup, value: str) -> None:
-    """Setter for link_name - updates object name and children."""
+def set_link_name(self: LinkPropertyGroup, value: str) -> None:
+    """Setter for link_name - updates persistent identity and object name."""
     if not value or not self.id_data:
         return
 
     # Sanitize link name for URDF (remove invalid characters)
     sanitized_name = sanitize_urdf_name(value)
 
+    # Store the persistent identity
+    self.urdf_name_stored = sanitized_name
+
     # Update object name to match link name
-    # Note: Blender may append .001, .002 etc if name conflicts exist
+    # Blender will handle collisions by appending suffixes, but our stored name persists
     if self.id_data.name != sanitized_name:
         self.id_data.name = sanitized_name
 
@@ -81,7 +88,7 @@ def on_collision_quality_update(self: bpy.types.PropertyGroup, context: Context)
         return
 
     obj = typing.cast(bpy.types.Object, self.id_data)
-    lf = typing.cast(typing.Any, obj).linkforge
+    lf = getattr(obj, "linkforge")
     if not lf.is_robot_link:
         return
 
@@ -90,14 +97,14 @@ def on_collision_quality_update(self: bpy.types.PropertyGroup, context: Context)
     if collision_obj is None:
         return
 
-    # Check if it's imported from URDF (don't regenerate imported collisions)
-    if typing.cast(typing.Any, collision_obj).get("imported_from_urdf"):
+    # Skip regeneration for imported URDF models to preserve external data
+    if "imported_from_urdf" in collision_obj:  # type: ignore[operator]
         return
 
-    # Schedule regeneration (debounced via timer to prevent lag)
-    from ..operators.link_ops import schedule_collision_preview_update
+    # Update ratio in realtime
+    from ..operators.link_ops import update_collision_quality_realtime
 
-    schedule_collision_preview_update(obj)
+    update_collision_quality_realtime(obj, collision_obj)
 
 
 def update_auto_inertia_toggle(self: PropertyGroup, context: Context) -> None:
@@ -119,6 +126,14 @@ class LinkPropertyGroup(PropertyGroup):
         name="Is Robot Link",
         description="Mark this object as a robot link",
         default=False,
+    )
+
+    # Persistent URDF Identity
+    # Decouples logical URDF naming from physical Blender object names (resilient to .001 suffixes)
+    urdf_name_stored: StringProperty(  # type: ignore
+        name="URDF Name",
+        description="Persistent URDF name. Prevents mapping breakage if Blender renames the object",
+        default="",
     )
 
     link_name: StringProperty(  # type: ignore

@@ -23,7 +23,7 @@ from ...linkforge_core.models import (
 from ...linkforge_core.utils.kinematics import sort_joints_topological
 from ..preferences import get_addon_prefs
 from ..utils.joint_utils import resolve_mimic_joints
-from ..utils.scene_utils import move_to_collection
+from ..utils.scene_utils import move_to_collection, sync_object_collections
 
 logger = get_logger(__name__)
 
@@ -69,7 +69,7 @@ def create_material_from_color(color: Color, name: str) -> bpy.types.Material | 
     return mat
 
 
-def create_primitive_mesh(geometry: typing.Any, name: str) -> bpy.types.Object | None:
+def create_primitive_mesh(geometry: Box | Cylinder | Sphere, name: str) -> bpy.types.Object | None:
     """Create a Blender mesh object from primitive geometry.
 
     This function generates native Blender mesh primitives (Cube, Cylinder,
@@ -336,7 +336,7 @@ def normalize_and_consolidate_imported_objects(
     return final_obj
 
 
-def _get_geometry_type_str(geometry: typing.Any) -> str:
+def _get_geometry_type_str(geometry: Box | Cylinder | Sphere | Mesh) -> str:
     """Get geometry type string from geometry instance."""
     geometry_type_map = {
         Box: "BOX",
@@ -387,6 +387,7 @@ def create_link_object(
     if hasattr(link_obj, "linkforge"):
         props = link_obj.linkforge
         props.is_robot_link = True
+        props.urdf_name_stored = link.name
         props.link_name = link.name
 
     # Create all visual geometries (URDF allows multiple <visual> per link)
@@ -514,9 +515,8 @@ def create_link_object(
             # Without this, collision meshes degrade with each import-export cycle.
             collision_obj["imported_from_urdf"] = True
 
-            # Add collision mesh to collection
-            if collection:
-                move_to_collection(collision_obj, collection)
+            # Add collision mesh to link's collections
+            sync_object_collections(collision_obj, link_obj)
 
             # Clear materials from collision mesh (collision doesn't need materials)
             # Materials may come from imported mesh files (OBJ, DAE, etc.)
@@ -625,9 +625,13 @@ def create_joint_object(
     empty.rotation_mode = "XYZ"
     empty.location = (0, 0, 0)
 
-    # Add to collection
+    # Add to collection (hierarchy-aware)
     if collection:
-        collection.objects.link(empty)
+        if isinstance(collection, bpy.types.Collection):
+            collection.objects.link(empty)
+        else:
+            # It's an object, sync to its collections
+            sync_object_collections(empty, collection)
     elif bpy.context.scene and bpy.context.scene.collection:
         bpy.context.scene.collection.objects.link(empty)
 
@@ -635,6 +639,7 @@ def create_joint_object(
     if hasattr(empty, "linkforge_joint"):
         props = empty.linkforge_joint
         props.is_robot_joint = True
+        props.urdf_name_stored = joint.name
         props.joint_name = joint.name
 
         # Set joint type

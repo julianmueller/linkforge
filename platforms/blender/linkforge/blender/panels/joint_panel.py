@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import typing
 
 import bpy
 from bpy.types import Context, Panel
@@ -34,7 +33,7 @@ class LINKFORGE_PT_joints(Panel):
             and obj.select_get()
             and obj.type == "EMPTY"
             and hasattr(obj, "linkforge_joint")
-            and typing.cast(typing.Any, obj).linkforge_joint.is_robot_joint
+            and getattr(obj, "linkforge_joint").is_robot_joint
         )
 
         # Only show Create button when NOT editing a joint
@@ -42,15 +41,12 @@ class LINKFORGE_PT_joints(Panel):
             # Detect target link (either selected link or parent of selected visual)
             target_link = None
             if obj and obj.select_get():
-                if (
-                    hasattr(obj, "linkforge")
-                    and typing.cast(typing.Any, obj).linkforge.is_robot_link
-                ):
+                if hasattr(obj, "linkforge") and getattr(obj, "linkforge").is_robot_link:
                     target_link = obj
                 elif (
                     obj.parent
                     and hasattr(obj.parent, "linkforge")
-                    and typing.cast(typing.Any, obj.parent).linkforge.is_robot_link
+                    and getattr(obj.parent, "linkforge").is_robot_link
                 ):
                     # Selected object is a visual/collision child of a link
                     target_link = obj.parent
@@ -65,7 +61,7 @@ class LINKFORGE_PT_joints(Panel):
         if not is_joint or not obj:
             return
 
-        props = typing.cast(typing.Any, obj).linkforge_joint
+        props = getattr(obj, "linkforge_joint")
 
         # Joint properties
         box = layout.box()

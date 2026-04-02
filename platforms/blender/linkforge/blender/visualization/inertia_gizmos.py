@@ -264,7 +264,7 @@ def ensure_inertia_handler() -> None:
         tag_redraw()
 
 
-def check_manual_inertia_on_load(arg1: Any = None, arg2: Any = None) -> Any:
+def check_manual_inertia_on_load(_arg1: Any = None, _arg2: Any = None) -> Any:
     """Check if any link has Manual Inertia on file load or registration."""
     try:
         scene = bpy.context.scene
@@ -278,7 +278,7 @@ def check_manual_inertia_on_load(arg1: Any = None, arg2: Any = None) -> Any:
     if stats.manual_inertia_objects:
         ensure_inertia_handler()
 
-    return None  # For timer compliance
+    return None
 
 
 def register() -> None:

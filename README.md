@@ -30,6 +30,10 @@ It allows you to model your robot as naturally as sculpting a 3D scene, while ac
 | **Physics** | "Close Enough" Mesh Export | **Scientific Inertia & Mass Sanity** |
 | **Control** | Manual `ros2_control` XML | **Centralized Dashboard with auto-generation** |
 | **Fidelity** | One-way export | **Round-Trip Precision (Import → Edit → Export)** |
+| **Sim-to-Real** | Post-Simulation Testing | **Early-Phase Validation & Noise Injection** |
+
+> [!TIP]
+> For a deep dive into our long-term technical strategy and the "Digital Twin" philosophy, see **[VISION.md](VISION.md)**.
 
 ### 🛠️ Technical Specifications
 
@@ -41,18 +45,19 @@ It allows you to model your robot as naturally as sculpting a 3D scene, while ac
 | **Control** | ✅ Full | `ros2_control` Dashboard & Gazebo Plugin Integration |
 | **Validation** | ✅ Pro | **Linter for Robotics** catches structural errors before export |
 | **Fidelity** | ✅ Pro | **Round-Trip Precision** for lossless Import/Export |
-| **Formats** | ✅ Full | URDF 1.0, XACRO (Macros, Properties, Multi-file) |
+| **Formats** | ✅ Full | URDF 1.0, XACRO (Macros, Properties, Multi-file), **SRDF (Core API)** |
 
 ## 🚀 Key Features
 
-- **Bidirectional Workflow**: Import existing URDF/XACRO files for editing or build complex robot models from scratch using Blender native tools.
-- **Production-Ready Export**: Generates strictly compliant URDF/XACRO files optimized for ROS, ROS 2, and Gazebo. Includes **ROS-Agnostic Asset Resolution**, allowing complex robots to be imported and edited on any platform without requiring a ROS installation.
+- **Bidirectional Workflow**: Import existing URDF or XACRO files for editing or build complex robot models from scratch using Blender native tools.
+- **Production-Ready Export**: Generates strictly compliant URDF and XACRO files optimized for ROS, ROS 2, and Gazebo. Includes **ROS-Agnostic Asset Resolution** for cross-platform editing and **Core API** support for **SRDF** (Semantic Robot Description) generation.
 - **Linter for Robotics**: Built-in integrity checker inspects robot topology, physics data, and joint limits. It catches simulation-breaking errors (negative inertias, detached links, circular chains) *before* you export.
 - **ROS2 Control Support**: Automatically generates hardware interface configurations for `ros2_control` via a centralized dashboard, compatible with Gazebo and physical hardware.
 - **Complete Sensor Suite**: Integrated support for Camera, Depth Camera, LiDAR, IMU, GPS, **Force/Torque**, and **Contact** sensors with configurable noise models.
 - **Automatic Physics**: Scientifically accurate calculation of mass properties and inertia tensors for both primitive shapes and complex arbitrary meshes.
 - **Advanced XACRO Support**: Intelligent extraction of repeated geometry into macros and shared materials, producing maintainable and modular code.
 - **Round-Trip Fidelity**: The Import → Edit → Export cycle preserves all data with **absolute precision**, including sensor origins, transmission interfaces, and custom user properties.
+- **Modular Robot Assembly**: High-level **Composer API** (Core library) for assembling robots from modular sub-components, enabling rapid prototyping and **SRDF** generation for complex multi-part systems.
 
 ## 📦 Installation
 
@@ -176,7 +181,7 @@ The package will be created in the `dist/` directory.
 - [x] **v1.1.0**: Enhanced Documentation, Workflow Polish, & Bug Fixes.
 - [x] **v1.2.0**: **Architectural Stability** (Hexagonal Core, Numerical Precision).
 - [x] **v1.3.0**: **Performance & Control** (NumPy Acceleration, Depsgraph, & ROS2 Control).
-- [ ] **v1.4.0**: **Modular Assembly** (SRDF, Composer API, `linkforge_ros`).
+- [/] **v1.4.0**: **Modular Assembly** (SRDF, Composer API, `linkforge_ros`).
 - [ ] **v1.5.0**: **High-Fidelity Expansion pt.1** (MJCF/MuJoCo support).
 - [ ] **v1.6.0**: **High-Fidelity Expansion pt.2** (SDF/Gazebo support).
 - [ ] **v1.7.0**: **Mechanical Debugging** (Real-time IK & Collision Interference Validation).

@@ -10,7 +10,7 @@ from linkforge_core.parsers.urdf_parser import URDFParser
 class TestMultipleVisualElements:
     """Test multiple visual elements per link."""
 
-    def test_link_with_multiple_visuals(self):
+    def test_link_with_multiple_visuals(self) -> None:
         """Test creating link with multiple visual elements."""
         geom1 = Box(size=Vector3(1.0, 1.0, 1.0))
         geom2 = Cylinder(radius=0.5, length=1.0)
@@ -18,23 +18,23 @@ class TestMultipleVisualElements:
         v1 = Visual(geometry=geom1, name="box_visual")
         v2 = Visual(geometry=geom2, name="cylinder_visual")
 
-        link = Link(name="multi_visual_link", visuals=[v1, v2])
+        link = Link(name="multi_visual_link", initial_visuals=[v1, v2])
 
         assert len(link.visuals) == 2
         assert link.visuals[0].name == "box_visual"
         assert link.visuals[1].name == "cylinder_visual"
 
-    def test_link_with_single_visual(self):
+    def test_link_with_single_visual(self) -> None:
         """Test link with single visual element (list with one item)."""
         geom = Box(size=Vector3(1.0, 1.0, 1.0))
         visual = Visual(geometry=geom)
 
-        link = Link(name="single_visual_link", visuals=[visual])
+        link = Link(name="single_visual_link", initial_visuals=[visual])
 
         assert len(link.visuals) == 1
         assert link.visuals[0] == visual
 
-    def test_link_with_no_visuals(self):
+    def test_link_with_no_visuals(self) -> None:
         """Test link with empty visuals list."""
         link = Link(name="no_visual_link")
 
@@ -44,7 +44,7 @@ class TestMultipleVisualElements:
 class TestMultipleCollisionElements:
     """Test multiple collision elements per link."""
 
-    def test_link_with_multiple_collisions(self):
+    def test_link_with_multiple_collisions(self) -> None:
         """Test creating link with multiple collision elements."""
         geom1 = Box(size=Vector3(1.0, 1.0, 1.0))
         geom2 = Sphere(radius=0.5)
@@ -52,23 +52,23 @@ class TestMultipleCollisionElements:
         c1 = Collision(geometry=geom1, name="box_collision")
         c2 = Collision(geometry=geom2, name="sphere_collision")
 
-        link = Link(name="multi_collision_link", collisions=[c1, c2])
+        link = Link(name="multi_collision_link", initial_collisions=[c1, c2])
 
         assert len(link.collisions) == 2
         assert link.collisions[0].name == "box_collision"
         assert link.collisions[1].name == "sphere_collision"
 
-    def test_link_with_single_collision(self):
+    def test_link_with_single_collision(self) -> None:
         """Test link with single collision element."""
         geom = Box(size=Vector3(1.0, 1.0, 1.0))
         collision = Collision(geometry=geom)
 
-        link = Link(name="single_collision_link", collisions=[collision])
+        link = Link(name="single_collision_link", initial_collisions=[collision])
 
         assert len(link.collisions) == 1
         assert link.collisions[0] == collision
 
-    def test_link_with_no_collisions(self):
+    def test_link_with_no_collisions(self) -> None:
         """Test link with empty collisions list."""
         link = Link(name="no_collision_link")
 
@@ -78,7 +78,7 @@ class TestMultipleCollisionElements:
 class TestURDFParserMultipleElements:
     """Test URDF parser with multiple visual/collision elements."""
 
-    def test_parse_link_with_multiple_visuals(self):
+    def test_parse_link_with_multiple_visuals(self) -> None:
         """Test parsing link with multiple visual elements."""
         urdf_xml = """
         <robot name="test">
@@ -101,7 +101,7 @@ class TestURDFParserMultipleElements:
         assert isinstance(link.visuals[0].geometry, Box)
         assert isinstance(link.visuals[1].geometry, Cylinder)
 
-    def test_parse_link_with_multiple_collisions(self):
+    def test_parse_link_with_multiple_collisions(self) -> None:
         """Test parsing link with multiple collision elements."""
         urdf_xml = """
         <robot name="test">
@@ -122,7 +122,7 @@ class TestURDFParserMultipleElements:
         assert link.collisions[0].name == "collision1"
         assert link.collisions[1].name == "collision2"
 
-    def test_parse_link_with_unnamed_elements(self):
+    def test_parse_link_with_unnamed_elements(self) -> None:
         """Test parsing visual/collision without name attributes."""
         urdf_xml = """
         <robot name="test">
@@ -147,7 +147,7 @@ class TestURDFParserMultipleElements:
 class TestURDFGeneratorMultipleElements:
     """Test URDF generator with multiple visual/collision elements."""
 
-    def test_generate_multiple_visuals(self):
+    def test_generate_multiple_visuals(self) -> None:
         """Test generating URDF with multiple visual elements."""
         from linkforge_core.models import Robot
 
@@ -159,7 +159,7 @@ class TestURDFGeneratorMultipleElements:
         v1 = Visual(geometry=geom1, name="visual1")
         v2 = Visual(geometry=geom2, name="visual2")
 
-        link = Link(name="test_link", visuals=[v1, v2])
+        link = Link(name="test_link", initial_visuals=[v1, v2])
         robot.add_link(link)
 
         generator = URDFGenerator()
@@ -170,7 +170,7 @@ class TestURDFGeneratorMultipleElements:
         assert '<visual name="visual2">' in urdf_xml
         assert urdf_xml.count("<visual") == 2
 
-    def test_generate_multiple_collisions(self):
+    def test_generate_multiple_collisions(self) -> None:
         """Test generating URDF with multiple collision elements."""
         from linkforge_core.models import Robot
 
@@ -182,7 +182,7 @@ class TestURDFGeneratorMultipleElements:
         c1 = Collision(geometry=geom1, name="collision1")
         c2 = Collision(geometry=geom2, name="collision2")
 
-        link = Link(name="test_link", collisions=[c1, c2])
+        link = Link(name="test_link", initial_collisions=[c1, c2])
         robot.add_link(link)
 
         generator = URDFGenerator()
@@ -197,7 +197,7 @@ class TestURDFGeneratorMultipleElements:
 class TestRoundTripMultipleElements:
     """Test round-trip fidelity for multiple visual/collision elements."""
 
-    def test_roundtrip_multiple_visuals(self):
+    def test_roundtrip_multiple_visuals(self) -> None:
         """Test import -> export -> import preserves multiple visuals."""
         urdf_xml = """
         <robot name="test">
@@ -232,7 +232,7 @@ class TestRoundTripMultipleElements:
         assert robot2.links[0].visuals[1].name == "v2"
         assert robot2.links[0].visuals[2].name == "v3"
 
-    def test_roundtrip_multiple_collisions(self):
+    def test_roundtrip_multiple_collisions(self) -> None:
         """Test import -> export -> import preserves multiple collisions."""
         urdf_xml = """
         <robot name="test">
@@ -264,10 +264,10 @@ class TestExportCheckboxBehavior:
 
     These tests verify the expected behavior when use_visual_geometry=False
     or export_collision=False in Blender properties. The actual checkbox
-    logic is in converters.py lines 413 and 450.
+    logic is in converters.py.
     """
 
-    def test_link_with_no_visuals_exports_correctly(self):
+    def test_link_with_no_visuals_exports_correctly(self) -> None:
         """Test that link with empty visuals list generates valid URDF."""
         from linkforge_core.models import Robot
 
@@ -276,7 +276,7 @@ class TestExportCheckboxBehavior:
         collision = Collision(geometry=geom)
 
         # Link with collision but NO visuals (use_visual_geometry=False case)
-        link = Link(name="test_link", visuals=[], collisions=[collision])
+        link = Link(name="test_link", initial_visuals=[], initial_collisions=[collision])
         robot.add_link(link)
 
         generator = URDFGenerator()
@@ -291,7 +291,7 @@ class TestExportCheckboxBehavior:
         assert len(robot2.links[0].visuals) == 0
         assert len(robot2.links[0].collisions) == 1
 
-    def test_link_with_no_collisions_exports_correctly(self):
+    def test_link_with_no_collisions_exports_correctly(self) -> None:
         """Test that link with empty collisions list generates valid URDF."""
         from linkforge_core.models import Robot
 
@@ -300,7 +300,7 @@ class TestExportCheckboxBehavior:
         visual = Visual(geometry=geom)
 
         # Link with visual but NO collisions (export_collision=False case)
-        link = Link(name="test_link", visuals=[visual], collisions=[])
+        link = Link(name="test_link", initial_visuals=[visual], initial_collisions=[])
         robot.add_link(link)
 
         generator = URDFGenerator()
@@ -315,14 +315,14 @@ class TestExportCheckboxBehavior:
         assert len(robot2.links[0].visuals) == 1
         assert len(robot2.links[0].collisions) == 0
 
-    def test_link_with_neither_visual_nor_collision(self):
+    def test_link_with_neither_visual_nor_collision(self) -> None:
         """Test that link with no geometry at all is valid."""
         from linkforge_core.models import Robot
 
         robot = Robot(name="test_robot")
 
         # Link with NO visuals and NO collisions (both checkboxes unchecked)
-        link = Link(name="test_link", visuals=[], collisions=[])
+        link = Link(name="test_link", initial_visuals=[], initial_collisions=[])
         robot.add_link(link)
 
         generator = URDFGenerator()

@@ -7,10 +7,10 @@
 
 [![Latest Release](https://img.shields.io/github/v/release/arounamounchili/linkforge)](https://github.com/arounamounchili/linkforge/releases/latest)
 [![CI](https://github.com/arounamounchili/linkforge/actions/workflows/ci.yml/badge.svg)](https://github.com/arounamounchili/linkforge/actions)
-[![Documentation](https://readthedocs.org/projects/linkforge/badge/?version=latest)](https://linkforge.readthedocs.io/)
+[![Documentation](https://app.readthedocs.org/projects/linkforge/badge/?version=latest)](https://linkforge.readthedocs.io/en/latest/)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Blender](https://img.shields.io/badge/Blender-4.2%2B-orange.svg)](https://www.blender.org/download/)
-[![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-yellow.svg)](https://conventionalcommits.org)
+[![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-yellow.svg)](https://www.conventionalcommits.org)
 
 LinkForge is **The Linter & Bridge for Robotics**, integrating directly into Blender.
 
@@ -30,6 +30,10 @@ It allows you to model your robot as naturally as sculpting a 3D scene, while ac
 | **Physics** | "Close Enough" Mesh Export | **Scientific Inertia & Mass Sanity** |
 | **Control** | Manual `ros2_control` XML | **Centralized Dashboard with auto-generation** |
 | **Fidelity** | One-way export | **Round-Trip Precision (Import → Edit → Export)** |
+| **Sim-to-Real** | Post-Simulation Testing | **Early-Phase Validation & Noise Injection** |
+
+> [!TIP]
+> For a deep dive into our long-term technical strategy and the "Digital Twin" philosophy, see **[VISION.md](VISION.md)**.
 
 ### 🛠️ Technical Specifications
 
@@ -41,18 +45,19 @@ It allows you to model your robot as naturally as sculpting a 3D scene, while ac
 | **Control** | ✅ Full | `ros2_control` Dashboard & Gazebo Plugin Integration |
 | **Validation** | ✅ Pro | **Linter for Robotics** catches structural errors before export |
 | **Fidelity** | ✅ Pro | **Round-Trip Precision** for lossless Import/Export |
-| **Formats** | ✅ Full | URDF 1.0, XACRO (Macros, Properties, Multi-file) |
+| **Formats** | ✅ Full | URDF 1.0, XACRO (Macros, Properties, Multi-file), **SRDF (Core API)** |
 
 ## 🚀 Key Features
 
-- **Bidirectional Workflow**: Import existing URDF/XACRO files for editing or build complex robot models from scratch using Blender native tools.
-- **Production-Ready Export**: Generates strictly compliant URDF/XACRO files optimized for ROS, ROS 2, and Gazebo. Includes **ROS-Agnostic Asset Resolution**, allowing complex robots to be imported and edited on any platform without requiring a ROS installation.
+- **Bidirectional Workflow**: Import existing URDF or XACRO files for editing or build complex robot models from scratch using Blender native tools.
+- **Production-Ready Export**: Generates strictly compliant URDF and XACRO files optimized for ROS, ROS 2, and Gazebo. Includes **ROS-Agnostic Asset Resolution** for cross-platform editing and **Core API** support for **SRDF** (Semantic Robot Description) generation.
 - **Linter for Robotics**: Built-in integrity checker inspects robot topology, physics data, and joint limits. It catches simulation-breaking errors (negative inertias, detached links, circular chains) *before* you export.
 - **ROS2 Control Support**: Automatically generates hardware interface configurations for `ros2_control` via a centralized dashboard, compatible with Gazebo and physical hardware.
 - **Complete Sensor Suite**: Integrated support for Camera, Depth Camera, LiDAR, IMU, GPS, **Force/Torque**, and **Contact** sensors with configurable noise models.
 - **Automatic Physics**: Scientifically accurate calculation of mass properties and inertia tensors for both primitive shapes and complex arbitrary meshes.
 - **Advanced XACRO Support**: Intelligent extraction of repeated geometry into macros and shared materials, producing maintainable and modular code.
 - **Round-Trip Fidelity**: The Import → Edit → Export cycle preserves all data with **absolute precision**, including sensor origins, transmission interfaces, and custom user properties.
+- **Modular Robot Assembly**: High-level **Composer API** (Core library) for assembling robots from modular sub-components, enabling rapid prototyping and **SRDF** generation for complex multi-part systems.
 
 ## 📦 Installation
 
@@ -175,8 +180,8 @@ The package will be created in the `dist/` directory.
 - [x] **v1.0.0**: Core URDF/XACRO Export, Sensors, & `ros2_control` basics.
 - [x] **v1.1.0**: Enhanced Documentation, Workflow Polish, & Bug Fixes.
 - [x] **v1.2.0**: **Architectural Stability** (Hexagonal Core, Numerical Precision).
-- [ ] **v1.3.0**: **Performance & Control** (NumPy Acceleration, Depsgraph, & ROS2 Control).
-- [ ] **v1.4.0**: **Modular Assembly** (SRDF, Composer API, `linkforge_ros`).
+- [x] **v1.3.0**: **Performance & Control** (NumPy Acceleration, Depsgraph, & ROS2 Control).
+- [/] **v1.4.0**: **Modular Assembly** (SRDF, Composer API, `linkforge_ros`).
 - [ ] **v1.5.0**: **High-Fidelity Expansion pt.1** (MJCF/MuJoCo support).
 - [ ] **v1.6.0**: **High-Fidelity Expansion pt.2** (SDF/Gazebo support).
 - [ ] **v1.7.0**: **Mechanical Debugging** (Real-time IK & Collision Interference Validation).
@@ -194,12 +199,17 @@ We welcome contributions! LinkForge is a community-driven project.
 
 ## 📄 License
 
-This project is licensed under the **GNU General Public License v3.0** - see the [LICENSE](LICENSE) file for details.
+LinkForge follows a **Split-License Model** designed for both community-driven innovation and industrial-scale integration:
+
+- **`linkforge-core` (The Engine)**: Licensed under the **Apache License 2.0**. This permissive license allows industrial partners to integrate the core engine into proprietary pipelines and commercial products.
+- **`platforms/blender` (The UI)**: Licensed under the **GNU General Public License v3.0**. This ensures the visual modeling experience and its community-driven improvements remain open-source.
+
+For more details, see the [LICENSE](LICENSE) (GPL) and [core/LICENSE](core/LICENSE) (Apache) files.
 For third-party component licenses, see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 ## ✨ Our Contributors
 
-Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/docs/en/emoji-key)):
+Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/en/emoji-key/)):
 
 <!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
 <!-- prettier-ignore-start -->
@@ -212,6 +222,8 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/GeorgeKugler"><img src="https://avatars.githubusercontent.com/u/35666712?v=4?s=64" width="64px;" alt="GeKo-8"/><br /><sub><b>GeKo-8</b></sub></a><br /><a href="https://github.com/arounamounchili/linkforge/issues?q=author%3AGeorgeKugler" title="Bug reports">🐛</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/andreas-loeffler"><img src="https://avatars.githubusercontent.com/u/73336148?v=4?s=64" width="64px;" alt="Andreas Loeffler"/><br /><sub><b>Andreas Loeffler</b></sub></a><br /><a href="https://github.com/arounamounchili/linkforge/commits?author=andreas-loeffler" title="Code">💻</a> <a href="https://github.com/arounamounchili/linkforge/commits?author=andreas-loeffler" title="Tests">⚠️</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://www.mec.ed.tum.de/en/iwb/staff/research-team-assembly-technology-and-robotics/mueller-julian/"><img src="https://avatars.githubusercontent.com/u/32650678?v=4?s=64" width="64px;" alt="Julian Müller"/><br /><sub><b>Julian Müller</b></sub></a><br /><a href="#ideas-julianmueller" title="Ideas, Planning, & Feedback">🤔</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://cmp.felk.cvut.cz/~peckama2/"><img src="https://avatars.githubusercontent.com/u/182533?v=4?s=64" width="64px;" alt="Martin Pecka"/><br /><sub><b>Martin Pecka</b></sub></a><br /><a href="https://github.com/arounamounchili/linkforge/issues?q=author%3Apeci1" title="Bug reports">🐛</a> <a href="#ideas-peci1" title="Ideas, Planning, & Feedback">🤔</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/lionelfung7"><img src="https://avatars.githubusercontent.com/u/50703745?v=4?s=64" width="64px;" alt="lionelfung7"/><br /><sub><b>lionelfung7</b></sub></a><br /><a href="https://github.com/arounamounchili/linkforge/issues?q=author%3Alionelfung7" title="Bug reports">🐛</a></td>
     </tr>
   </tbody>
 </table>
@@ -221,7 +233,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
 
 <!-- ALL-CONTRIBUTORS-LIST:END -->
 
-This project follows the [all-contributors](https://github.com/all-contributors/all-contributors) specification. Contributions of any kind welcome!
+This project follows the [all-contributors](https://github.com/all-contributors/allcontributors.org) specification. Contributions of any kind welcome!
 
 <p align="center">
   <b>Made with ❤️ for roboticists worldwide</b><br/>

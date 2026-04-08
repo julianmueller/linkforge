@@ -16,11 +16,13 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
-from ..base import RobotGenerator, RobotGeneratorError
+from .. import __version__
+from ..base import RobotGeneratorError
+from ..logging_config import get_logger
 from ..models.gazebo import GazeboElement, GazeboPlugin
-from ..models.geometry import Box, Cylinder, Geometry, Mesh, Sphere, Transform
+from ..models.geometry import Transform
 from ..models.joint import Joint, JointType
-from ..models.link import Collision, Inertial, Link, Visual
+from ..models.link import Collision, Link, Visual
 from ..models.material import Material
 from ..models.robot import Robot
 from ..models.ros2_control import Ros2Control
@@ -37,10 +39,14 @@ from ..models.sensor import (
 )
 from ..models.transmission import Transmission
 from ..utils.math_utils import format_float, format_vector
-from ..utils.xml_utils import serialize_xml
+from ..utils.xml_utils import create_xml_element, serialize_xml
+from ..validation import RobotValidator
+from .xml_base import RobotXMLGenerator
+
+logger = get_logger(__name__)
 
 
-class URDFGenerator(RobotGenerator[str]):
+class URDFGenerator(RobotXMLGenerator):
     """Unified Robot Description Format (URDF) generator."""
 
     def __init__(
@@ -56,8 +62,8 @@ class URDFGenerator(RobotGenerator[str]):
             urdf_path: Path where URDF will be saved. Used to calculate relative mesh paths.
                       If None, mesh paths will be absolute or package:// URIs.
             use_ros2_control: Whether to generate ros2_control blocks from transmissions.
-                            Set to False if you don't use ROS2 Control or prefer manual configuration.
-                            (default: True)
+                             Set to False if you don't use ROS2 Control or prefer
+                             manual configuration. (default: True)
 
         Example:
             >>> from pathlib import Path
@@ -67,7 +73,7 @@ class URDFGenerator(RobotGenerator[str]):
             >>> # Generator with relative mesh paths
             >>> generator = URDFGenerator(urdf_path=Path("/workspace/robot.urdf"))
         """
-        self.pretty_print = pretty_print
+        super().__init__(pretty_print=pretty_print, output_path=urdf_path)
         self.urdf_path = urdf_path
         self.use_ros2_control = use_ros2_control
 
@@ -77,7 +83,7 @@ class URDFGenerator(RobotGenerator[str]):
         Args:
             robot: Robot model with links, joints, sensors, etc.
             validate: Whether to validate robot structure before generation (default: True)
-            **kwargs: Additional generation options
+            **kwargs: Additional generation options (e.g. 'compact' to avoid comments)
 
         Returns:
             URDF XML as formatted string with proper indentation
@@ -85,7 +91,8 @@ class URDFGenerator(RobotGenerator[str]):
         Raises:
             RobotGeneratorError: If robot validation fails (checks for cycles, missing links, etc.)
         """
-        from .. import __version__
+        if kwargs:
+            logger.debug(f"URDFGenerator: unused generation options: {list(kwargs.keys())}")
 
         root = self.generate_robot_element(robot, validate=validate)
         return serialize_xml(root, pretty_print=self.pretty_print, version=__version__)
@@ -102,10 +109,8 @@ class URDFGenerator(RobotGenerator[str]):
         """
         # Validate robot structure
         if validate:
-            from ..validation import RobotValidator
-
-            validator = RobotValidator(robot)
-            result = validator.validate()
+            validator = RobotValidator()
+            result = validator.validate(robot)
             if not result.is_valid:
                 error_msgs = [str(issue) for issue in result.errors]
                 raise RobotGeneratorError("Robot validation failed:\n" + "\n".join(error_msgs))
@@ -154,7 +159,7 @@ class URDFGenerator(RobotGenerator[str]):
             parent.append(ET.Comment(" Links "))
         # Sort links by name for deterministic output
         for link in sorted(robot.links, key=lambda link_item: link_item.name):
-            self._add_link_to_xml(parent, link, robot)
+            self._add_link_to_xml(parent, link)
 
     def add_joints_section(self, parent: ET.Element, robot: Robot) -> None:
         """Add Joints section to parent element."""
@@ -162,13 +167,13 @@ class URDFGenerator(RobotGenerator[str]):
             parent.append(ET.Comment(" Joints "))
         # Sort joints by name for deterministic output
         for joint in sorted(robot.joints, key=lambda joint_item: joint_item.name):
-            self._add_joint_to_xml(parent, joint, robot)
+            self._add_joint_to_xml(parent, joint)
 
-    def _add_link_to_xml(self, parent: ET.Element, link: Link, robot: Robot) -> None:
+    def _add_link_to_xml(self, parent: ET.Element, link: Link) -> None:
         """Hook for adding a single link. Can be overridden (e.g. for XACRO macros)."""
         self._add_link_element(parent, link)
 
-    def _add_joint_to_xml(self, parent: ET.Element, joint: Joint, robot: Robot) -> None:
+    def _add_joint_to_xml(self, parent: ET.Element, joint: Joint) -> None:
         """Hook for adding a single joint. Can be overridden."""
         self._add_joint_element(parent, joint)
 
@@ -239,10 +244,12 @@ class URDFGenerator(RobotGenerator[str]):
                 f"{format_float(material.color.b)} "
                 f"{format_float(material.color.a)}"
             )
-            ET.SubElement(mat_elem, "color", rgba=rgba_str)
+            create_xml_element(mat_elem, "color", formatter=self._format_value, rgba=rgba_str)
 
         if material.texture:
-            ET.SubElement(mat_elem, "texture", filename=material.texture)
+            create_xml_element(
+                mat_elem, "texture", formatter=self._format_value, filename=material.texture
+            )
 
     def _add_link_element(self, parent: ET.Element, link: Link) -> None:
         """Add link element to parent."""
@@ -277,7 +284,7 @@ class URDFGenerator(RobotGenerator[str]):
         self._add_origin_element(visual_elem, visual.origin)
 
         # Geometry
-        self._add_geometry_element(visual_elem, visual.geometry)
+        self._add_geometry_element(visual.geometry, visual_elem)
 
         # Material (reference if in global materials, inline otherwise)
         if visual.material:
@@ -321,75 +328,7 @@ class URDFGenerator(RobotGenerator[str]):
         self._add_origin_element(collision_elem, collision.origin)
 
         # Geometry
-        self._add_geometry_element(collision_elem, collision.geometry)
-
-    def _add_inertial_element(self, parent: ET.Element, inertial: Inertial) -> None:
-        """Add inertial element to parent."""
-        inertial_elem = ET.SubElement(parent, "inertial")
-
-        # Origin (COM position)
-        self._add_origin_element(inertial_elem, inertial.origin)
-
-        # Mass
-        ET.SubElement(inertial_elem, "mass", value=format_float(inertial.mass))
-
-        # Inertia tensor
-        inertia = inertial.inertia
-        ET.SubElement(
-            inertial_elem,
-            "inertia",
-            ixx=format_float(inertia.ixx),
-            ixy=format_float(inertia.ixy),
-            ixz=format_float(inertia.ixz),
-            iyy=format_float(inertia.iyy),
-            iyz=format_float(inertia.iyz),
-            izz=format_float(inertia.izz),
-        )
-
-    def _add_origin_element(self, parent: ET.Element, transform: Transform) -> None:
-        """Add origin element to parent."""
-        # Skip if None or identity transform
-        if transform is None or transform == Transform.identity():
-            return
-
-        xyz_str = format_vector(transform.xyz.x, transform.xyz.y, transform.xyz.z)
-        rpy_str = format_vector(transform.rpy.x, transform.rpy.y, transform.rpy.z)
-        ET.SubElement(parent, "origin", xyz=xyz_str, rpy=rpy_str)
-
-    def _add_geometry_element(self, parent: ET.Element, geometry: Geometry) -> None:
-        """Add geometry element to parent."""
-        geom_elem = ET.SubElement(parent, "geometry")
-
-        if isinstance(geometry, Box):
-            size_str = format_vector(geometry.size.x, geometry.size.y, geometry.size.z)
-            ET.SubElement(geom_elem, "box", size=size_str)
-
-        elif isinstance(geometry, Cylinder):
-            ET.SubElement(
-                geom_elem,
-                "cylinder",
-                radius=format_float(geometry.radius),
-                length=format_float(geometry.length),
-            )
-
-        elif isinstance(geometry, Sphere):
-            ET.SubElement(geom_elem, "sphere", radius=format_float(geometry.radius))
-
-        elif isinstance(geometry, Mesh):
-            # Make mesh path relative to URDF location if possible
-            mesh_path = geometry.filepath
-            if self.urdf_path and mesh_path.is_absolute():
-                import contextlib
-
-                with contextlib.suppress(ValueError):
-                    mesh_path = mesh_path.relative_to(self.urdf_path.parent)
-
-            attrib: dict[str, str] = {"filename": str(mesh_path)}
-            # Check if scale is not default (1.0, 1.0, 1.0)
-            if geometry.scale.x != 1.0 or geometry.scale.y != 1.0 or geometry.scale.z != 1.0:
-                scale_str = format_vector(geometry.scale.x, geometry.scale.y, geometry.scale.z)
-                attrib["scale"] = scale_str
-            ET.SubElement(geom_elem, "mesh", **attrib)  # type: ignore[arg-type]
+        self._add_geometry_element(collision.geometry, collision_elem)
 
     def _add_joint_element(self, parent: ET.Element, joint: Joint) -> None:
         """Add joint element to parent."""
@@ -406,12 +345,17 @@ class URDFGenerator(RobotGenerator[str]):
         self._add_joint_properties(joint_elem, joint)
 
     def _add_joint_properties(self, joint_elem: ET.Element, joint: Joint) -> None:
-        """Add functional properties to joint element.
-
-        Shared between standard joints and XACRO macro definitions.
-        Includes axis, limits, dynamics, mimic, safety controller and calibration.
-        """
+        """Add functional properties to joint element."""
         # Axis (only for revolute, continuous, prismatic, planar)
+        self._add_joint_axis(joint_elem, joint)
+        self._add_joint_limits(joint_elem, joint)
+        self._add_joint_dynamics(joint_elem, joint)
+        self._add_joint_mimic(joint_elem, joint)
+        self._add_joint_safety(joint_elem, joint)
+        self._add_joint_calibration(joint_elem, joint)
+
+    def _add_joint_axis(self, joint_elem: ET.Element, joint: Joint) -> None:
+        """Add joint axis if applicable."""
         if (
             joint.type
             in (
@@ -425,20 +369,22 @@ class URDFGenerator(RobotGenerator[str]):
             axis_str = format_vector(joint.axis.x, joint.axis.y, joint.axis.z)
             ET.SubElement(joint_elem, "axis", xyz=axis_str)
 
-        # Limits
+    def _add_joint_limits(self, joint_elem: ET.Element, joint: Joint) -> None:
+        """Add joint mechanical limits."""
         if joint.limits:
-            attrib: dict[str, str] = {
-                "effort": format_float(joint.limits.effort),
-                "velocity": format_float(joint.limits.velocity),
+            attrib = {
+                "effort": joint.limits.effort,
+                "velocity": joint.limits.velocity,
             }
             # Only add lower/upper if they are specified (not for CONTINUOUS joints)
             if joint.limits.lower is not None:
-                attrib["lower"] = format_float(joint.limits.lower)
+                attrib["lower"] = joint.limits.lower
             if joint.limits.upper is not None:
-                attrib["upper"] = format_float(joint.limits.upper)
-            ET.SubElement(joint_elem, "limit", **attrib)  # type: ignore[arg-type]
+                attrib["upper"] = joint.limits.upper
+            create_xml_element(joint_elem, "limit", formatter=self._format_value, **attrib)
 
-        # Dynamics
+    def _add_joint_dynamics(self, joint_elem: ET.Element, joint: Joint) -> None:
+        """Add joint dynamics like damping and friction."""
         if joint.dynamics:
             ET.SubElement(
                 joint_elem,
@@ -447,35 +393,41 @@ class URDFGenerator(RobotGenerator[str]):
                 friction=format_float(joint.dynamics.friction),
             )
 
-        # Mimic
+    def _add_joint_mimic(self, joint_elem: ET.Element, joint: Joint) -> None:
+        """Add joint mimic information if applicable."""
         if joint.mimic:
-            mimic_attrib: dict[str, str] = {"joint": joint.mimic.joint}
+            mimic_attrib: dict[str, str | float] = {"joint": joint.mimic.joint}
             if joint.mimic.multiplier != 1.0:
-                mimic_attrib["multiplier"] = format_float(joint.mimic.multiplier)
+                mimic_attrib["multiplier"] = joint.mimic.multiplier
             if joint.mimic.offset != 0.0:
-                mimic_attrib["offset"] = format_float(joint.mimic.offset)
-            ET.SubElement(joint_elem, "mimic", **mimic_attrib)  # type: ignore[arg-type]
+                mimic_attrib["offset"] = joint.mimic.offset
 
-        # Safety Controller
+            create_xml_element(joint_elem, "mimic", formatter=self._format_value, **mimic_attrib)
+
+    def _add_joint_safety(self, joint_elem: ET.Element, joint: Joint) -> None:
+        """Add safety controller limits."""
         if joint.safety_controller:
-            safety_attrib: dict[str, str] = {
-                "soft_lower_limit": format_float(joint.safety_controller.soft_lower_limit),
-                "soft_upper_limit": format_float(joint.safety_controller.soft_upper_limit),
-                "k_position": format_float(joint.safety_controller.k_position),
-                "k_velocity": format_float(joint.safety_controller.k_velocity),
+            s = joint.safety_controller
+            safety_attrib = {
+                "soft_lower_limit": s.soft_lower_limit,
+                "soft_upper_limit": s.soft_upper_limit,
+                "k_position": s.k_position,
+                "k_velocity": s.k_velocity,
             }
-            ET.SubElement(joint_elem, "safety_controller", **safety_attrib)  # type: ignore[arg-type]
+            create_xml_element(
+                joint_elem, "safety_controller", formatter=self._format_value, **safety_attrib
+            )
 
-        # Calibration
+    def _add_joint_calibration(self, joint_elem: ET.Element, joint: Joint) -> None:
+        """Add joint calibration offsets."""
         if joint.calibration:
-            calib_attrib: dict[str, str] = {}
-            if joint.calibration.rising is not None:
-                calib_attrib["rising"] = format_float(joint.calibration.rising)
-            if joint.calibration.falling is not None:
-                calib_attrib["falling"] = format_float(joint.calibration.falling)
-
-            if calib_attrib:
-                ET.SubElement(joint_elem, "calibration", **calib_attrib)  # type: ignore[arg-type]
+            c = joint.calibration
+            calib_attrib = {"rising": c.rising, "falling": c.falling}
+            # Only add if at least one value is not None
+            if any(v is not None for v in calib_attrib.values()):
+                create_xml_element(
+                    joint_elem, "calibration", formatter=self._format_value, **calib_attrib
+                )
 
     def _add_transmission_element(self, parent: ET.Element, transmission: Transmission) -> None:
         """Add transmission element to parent.
@@ -795,22 +747,6 @@ class URDFGenerator(RobotGenerator[str]):
             bias_stddev_elem = ET.SubElement(noise_elem, "bias_stddev")
             bias_stddev_elem.text = format_float(noise.bias_stddev)
 
-    @staticmethod
-    def _add_optional_bool_element(parent: ET.Element, tag: str, value: bool | None) -> None:
-        """Add optional boolean XML element if value is not None."""
-        if value is not None:
-            elem = ET.SubElement(parent, tag)
-            elem.text = "true" if value else "false"
-
-    @staticmethod
-    def _add_optional_numeric_element(
-        parent: ET.Element, tag: str, value: float | int | None
-    ) -> None:
-        """Add optional numeric XML element if value is not None."""
-        if value is not None:
-            elem = ET.SubElement(parent, tag)
-            elem.text = format_float(float(value))
-
     def _add_gazebo_element(self, parent: ET.Element, gazebo_elem: GazeboElement) -> None:
         """Add Gazebo extension element to parent.
 
@@ -824,12 +760,13 @@ class URDFGenerator(RobotGenerator[str]):
         if gazebo_elem.reference is not None:
             attrib["reference"] = gazebo_elem.reference
 
-        gz_elem = ET.SubElement(parent, "gazebo", **attrib)  # type: ignore[arg-type]
+        gz_elem = create_xml_element(parent, "gazebo", formatter=self._format_value, **attrib)
 
         # Add material if specified
         if gazebo_elem.material is not None:
-            material_elem = ET.SubElement(gz_elem, "material")
-            material_elem.text = gazebo_elem.material
+            from ..utils.xml_utils import xml_add_text
+
+            xml_add_text(gz_elem, "material", gazebo_elem.material)
 
         # Add boolean properties
         self._add_optional_bool_element(gz_elem, "selfCollide", gazebo_elem.self_collide)

@@ -12,77 +12,95 @@ from bpy.props import (
     BoolProperty,
     EnumProperty,
     FloatProperty,
-    FloatVectorProperty,  # This was removed in the instruction, but is used later. Re-adding to maintain syntactical correctness.
+    FloatVectorProperty,
     PointerProperty,
     StringProperty,
 )
 from bpy.types import Context, PropertyGroup
+from linkforge_core.utils.string_utils import sanitize_name as sanitize_urdf_name
 
-from ...linkforge_core.utils.string_utils import sanitize_name as sanitize_urdf_name
+from linkforge.blender.utils.link_utils import should_rename_child
+from linkforge.blender.utils.scene_utils import clear_stats_cache
+from linkforge.blender.visualization.inertia_gizmos import tag_redraw
 
 
-def get_link_name(self: bpy.types.PropertyGroup) -> str:
-    """Getter for link_name - mirrors and sanitizes the Blender object name."""
+def get_link_name(self: LinkPropertyGroup) -> str:
+    """Getter for link_name - returns the persistent URDF identity.
+
+    Args:
+        self: The LinkPropertyGroup instance.
+
+    Returns:
+        The sanitized URDF name.
+    """
+    # Prioritize the stored identity to avoid Blender's .001 suffixing
+    if self.urdf_name_stored:
+        return str(self.urdf_name_stored)
+
     if not self.id_data:
         return ""
-    return sanitize_urdf_name(self.id_data.name)
+    return sanitize_urdf_name(str(self.id_data.name))
 
 
-def set_link_name(self: bpy.types.PropertyGroup, value: str) -> None:
-    """Setter for link_name - updates object name and children."""
+def set_link_name(self: LinkPropertyGroup, value: str) -> None:
+    """Setter for link_name - updates persistent identity and object name.
+
+    Args:
+        self: The LinkPropertyGroup instance.
+        value: The new name value to set.
+    """
     if not value or not self.id_data:
         return
 
     # Sanitize link name for URDF (remove invalid characters)
     sanitized_name = sanitize_urdf_name(value)
 
+    # Store the old name before updating for child renaming logic
+    old_urdf_name = self.urdf_name_stored or sanitize_urdf_name(self.id_data.name)
+
+    # Store the persistent identity
+    self.urdf_name_stored = sanitized_name
+
     # Update object name to match link name
-    # Note: Blender may append .001, .002 etc if name conflicts exist
+    # Blender will handle collisions by appending suffixes, but our stored name persists
     if self.id_data.name != sanitized_name:
+        # Block handler loop: We only update if they differ already
         self.id_data.name = sanitized_name
 
-    # Update visual and collision children names to match
+    # Update visual and collision children names IF they followed the standard naming pattern
     for child in self.id_data.children:
-        child_lower = child.name.lower()
-        if "_visual" in child_lower:
-            # Preserve any suffix like _visual_02
-            if "_visual_" in child_lower:
-                # Extract suffix (e.g., "_02")
-                parts = child.name.split("_visual_")
-                if len(parts) == 2:
-                    new_name = f"{sanitized_name}_visual_{parts[1]}"
-                    if child.name != new_name:
-                        child.name = new_name
-            else:
-                new_name = f"{sanitized_name}_visual"
-                if child.name != new_name:
-                    child.name = new_name
-        elif "_collision" in child_lower:
-            # Preserve any suffix like _collision_02
-            if "_collision_" in child_lower:
-                parts = child.name.split("_collision_")
-                if len(parts) == 2:
-                    new_name = f"{sanitized_name}_collision_{parts[1]}"
-                    if child.name != new_name:
-                        child.name = new_name
-            else:
-                new_name = f"{sanitized_name}_collision"
-                if child.name != new_name:
-                    child.name = new_name
+        if should_rename_child(child.name, old_urdf_name):
+            # Surgical replacement
+            if "_visual" in child.name:
+                suffix = child.name[len(old_urdf_name) + len("_visual") :]
+                new_name = f"{sanitized_name}_visual{suffix}"
+            else:  # _collision
+                suffix = child.name[len(old_urdf_name) + len("_collision") :]
+                new_name = f"{sanitized_name}_collision{suffix}"
+
+            if child.name != new_name:
+                child.name = new_name
+
+    # Clear statistics cache when names/structure changes
+    clear_stats_cache()
 
 
-def on_collision_quality_update(self: bpy.types.PropertyGroup, context: Context) -> None:
+def on_collision_quality_update(self: PropertyGroup, _context: Context) -> None:
     """Update collision mesh preview when quality changes.
 
     This provides live feedback to the user as they adjust the quality slider,
     showing them exactly how the exported collision mesh will look.
-    """
-    if not self.id_data:
-        return
 
-    obj = typing.cast(bpy.types.Object, self.id_data)
-    lf = typing.cast(typing.Any, obj).linkforge
-    if not lf.is_robot_link:
+    Args:
+        self: The LinkPropertyGroup instance owning the quality property.
+        _context: The current Blender context.
+    """
+    # Use id_data to access the object this property is attached to
+    obj = getattr(self, "id_data", None)
+    if not obj:
+        return
+    lf = getattr(obj, "linkforge", None)
+    if not lf or not lf.is_robot_link:
         return
 
     # Find collision object
@@ -90,22 +108,37 @@ def on_collision_quality_update(self: bpy.types.PropertyGroup, context: Context)
     if collision_obj is None:
         return
 
-    # Check if it's imported from URDF (don't regenerate imported collisions)
-    if typing.cast(typing.Any, collision_obj).get("imported_from_urdf"):
-        return
+    # Skip regeneration for imported URDF models to preserve external data
+    try:
+        # Use dictionary access for Blender ID properties
+        if collision_obj["imported_from_urdf"]:
+            return
+    except (KeyError, TypeError):
+        # Property doesn't exist, proceed with regeneration
+        pass
 
-    # Schedule regeneration (debounced via timer to prevent lag)
-    from ..operators.link_ops import schedule_collision_preview_update
+    # Update ratio in realtime
+    from ..operators.link_ops import update_collision_quality_realtime
 
-    schedule_collision_preview_update(obj)
+    update_collision_quality_realtime(obj, collision_obj)
 
 
-def update_auto_inertia_toggle(self: PropertyGroup, context: Context) -> None:
+def update_inertia_viz(_self: PropertyGroup, _context: Context) -> None:
+    """Trigger visual update for inertia gizmos."""
+    clear_stats_cache()
+    tag_redraw()
+
+
+def update_auto_inertia_toggle(self: PropertyGroup, _context: Context) -> None:
     """Enable visualization when switching to manual inertia."""
     if not hasattr(self, "use_auto_inertia"):
         return
+
+    # Always clear cache to ensure the draw handler sees the update immediately
+    clear_stats_cache()
+
     if not getattr(self, "use_auto_inertia", True):
-        # User switched to Manual Mode -> Enable visualization
+        # User switched to Manual Mode -> Ensure handler is running
         from ..visualization.inertia_gizmos import ensure_inertia_handler
 
         ensure_inertia_handler()
@@ -121,12 +154,21 @@ class LinkPropertyGroup(PropertyGroup):
         default=False,
     )
 
+    # Persistent URDF Identity
+    # Decouples logical URDF naming from physical Blender object names (resilient to .001 suffixes)
+    urdf_name_stored: StringProperty(  # type: ignore
+        name="URDF Name",
+        description="Persistent URDF name. Prevents mapping breakage if Blender renames the object",
+        default="",
+    )
+
     link_name: StringProperty(  # type: ignore
         name="Link Name",
         description="Name of the link in URDF (must be unique)",
         maxlen=64,
         get=get_link_name,
         set=set_link_name,
+        update=clear_stats_cache,
     )
 
     # Inertial properties
@@ -146,6 +188,7 @@ class LinkPropertyGroup(PropertyGroup):
         max=1000000.0,
         unit="MASS",
         precision=3,
+        update=clear_stats_cache,
     )
 
     # Manual inertia tensor (when auto_inertia is disabled)
@@ -201,6 +244,7 @@ class LinkPropertyGroup(PropertyGroup):
         size=3,
         precision=3,
         unit="LENGTH",
+        update=update_inertia_viz,
     )
 
     inertia_origin_rpy: FloatVectorProperty(  # type: ignore
@@ -210,6 +254,7 @@ class LinkPropertyGroup(PropertyGroup):
         size=3,
         precision=3,
         unit="ROTATION",
+        update=update_inertia_viz,
     )
 
     collision_type: EnumProperty(  # type: ignore
@@ -265,7 +310,12 @@ def register() -> None:
         bpy.utils.unregister_class(LinkPropertyGroup)
         bpy.utils.register_class(LinkPropertyGroup)
 
-    bpy.types.Object.linkforge = PointerProperty(type=LinkPropertyGroup)  # type: ignore
+    prop_name = "linkforge"
+    setattr(
+        bpy.types.Object,
+        prop_name,
+        typing.cast(typing.Any, PointerProperty(type=LinkPropertyGroup)),
+    )
 
 
 def unregister() -> None:
@@ -273,7 +323,7 @@ def unregister() -> None:
     import contextlib
 
     with contextlib.suppress(AttributeError):
-        del bpy.types.Object.linkforge  # type: ignore
+        delattr(bpy.types.Object, "linkforge")
 
     with contextlib.suppress(RuntimeError):
         bpy.utils.unregister_class(LinkPropertyGroup)

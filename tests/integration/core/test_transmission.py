@@ -17,7 +17,7 @@ from linkforge_core.models import (
 from linkforge_core.parsers.urdf_parser import URDFParser
 
 
-def test_simple_transmission():
+def test_simple_transmission() -> None:
     """Test SIMPLE transmission type."""
     robot = Robot(name="test_robot")
     robot.add_link(Link(name="base_link"))
@@ -51,7 +51,7 @@ def test_simple_transmission():
             )
         ],
     )
-    robot.transmissions.append(trans)
+    robot.add_transmission(trans)
 
     # Export
     generator = URDFGenerator()
@@ -71,7 +71,7 @@ def test_simple_transmission():
     assert hw_iface.text == "effort"
 
 
-def test_differential_transmission():
+def test_differential_transmission() -> None:
     """Test DIFFERENTIAL transmission type."""
     robot = Robot(name="test_robot")
     robot.add_link(Link(name="base_link"))
@@ -109,7 +109,7 @@ def test_differential_transmission():
             TransmissionActuator(name="right_motor", hardware_interfaces=["velocity"]),
         ],
     )
-    robot.transmissions.append(trans)
+    robot.add_transmission(trans)
 
     # Export
     generator = URDFGenerator()
@@ -133,7 +133,7 @@ def test_differential_transmission():
     assert len(actuators) == 2
 
 
-def test_four_bar_linkage_transmission():
+def test_four_bar_linkage_transmission() -> None:
     """Test FOUR_BAR_LINKAGE transmission type."""
     robot = Robot(name="test_robot")
     robot.add_link(Link(name="base_link"))
@@ -169,7 +169,7 @@ def test_four_bar_linkage_transmission():
             )
         ],
     )
-    robot.transmissions.append(trans)
+    robot.add_transmission(trans)
 
     # Export
     generator = URDFGenerator()
@@ -193,7 +193,7 @@ def test_four_bar_linkage_transmission():
     assert float(offset_elem.text) == 0.1
 
 
-def test_custom_transmission():
+def test_custom_transmission() -> None:
     """Test CUSTOM transmission type."""
     robot = Robot(name="test_robot")
     robot.add_link(Link(name="base_link"))
@@ -216,7 +216,7 @@ def test_custom_transmission():
         joints=[TransmissionJoint(name="joint1", hardware_interfaces=["effort"])],
         actuators=[TransmissionActuator(name="motor1", hardware_interfaces=["effort"])],
     )
-    robot.transmissions.append(trans)
+    robot.add_transmission(trans)
 
     # Export
     generator = URDFGenerator()
@@ -230,7 +230,7 @@ def test_custom_transmission():
     assert trans_elem.findtext("type") == "my_package/MyCustomTransmission"
 
 
-def test_all_hardware_interfaces():
+def test_all_hardware_interfaces() -> None:
     """Test all hardware interface types (position, velocity, effort)."""
     robot = Robot(name="test_robot")
     robot.add_link(Link(name="base_link"))
@@ -254,7 +254,7 @@ def test_all_hardware_interfaces():
             joints=[TransmissionJoint(name=f"joint{i}", hardware_interfaces=[interface])],
             actuators=[TransmissionActuator(name=f"motor{i}", hardware_interfaces=[interface])],
         )
-        robot.transmissions.append(trans)
+        robot.add_transmission(trans)
 
     # Export
     generator = URDFGenerator()
@@ -272,7 +272,7 @@ def test_all_hardware_interfaces():
         assert hw_iface.text == interface
 
 
-def test_transmission_roundtrip():
+def test_transmission_roundtrip() -> None:
     """Test transmission round-trip (import → export → import)."""
     original_urdf = """<?xml version="1.0"?>
     <robot name="test_robot">
@@ -323,7 +323,7 @@ def test_transmission_roundtrip():
     assert trans2.actuators[0].name == "motor1"
 
 
-def test_ros1_hardware_interface_normalization():
+def test_ros1_hardware_interface_normalization() -> None:
     """Test that ROS 1 hardware interface names are normalized to ROS 2."""
     urdf_with_ros1_interfaces = """<?xml version="1.0"?>
     <robot name="test_robot">

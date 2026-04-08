@@ -9,7 +9,7 @@ from linkforge_core.models import Color, Joint, JointType, Link, Material, Robot
 from linkforge_core.models.geometry import Box, Cylinder, Transform, Vector3
 
 
-def test_macro_generation_wheels():
+def test_macro_generation_wheels() -> None:
     """Test that 4 identical wheels are converted to a macro."""
     # Create base link
     base_link = Link(name="base_link")
@@ -23,7 +23,7 @@ def test_macro_generation_wheels():
 
     for i, name in enumerate(["front_left", "front_right", "rear_left", "rear_right"]):
         wheel_link = Link(
-            name=f"{name}_wheel", visuals=[Visual(geometry=wheel_geom, material=wheel_mat)]
+            name=f"{name}_wheel", initial_visuals=[Visual(geometry=wheel_geom, material=wheel_mat)]
         )
         links.append(wheel_link)
 
@@ -73,17 +73,17 @@ def test_macro_generation_wheels():
     assert "front_left_wheel" not in link_names, "Original link should be replaced by macro call"
 
 
-def test_macro_generation_mixed():
+def test_macro_generation_mixed() -> None:
     """Test that unique links are NOT converted to macros."""
     # Base + 2 identical wheels + 1 unique arm
     base = Link(name="base")
 
     wheel_geom = Cylinder(radius=0.1, length=0.05)
-    wheel1 = Link(name="w1", visuals=[Visual(geometry=wheel_geom)])
-    wheel2 = Link(name="w2", visuals=[Visual(geometry=wheel_geom)])
+    wheel1 = Link(name="w1", initial_visuals=[Visual(geometry=wheel_geom)])
+    wheel2 = Link(name="w2", initial_visuals=[Visual(geometry=wheel_geom)])
 
     arm_geom = Box(size=Vector3(1, 0.1, 0.1))
-    arm = Link(name="arm", visuals=[Visual(geometry=arm_geom)])
+    arm = Link(name="arm", initial_visuals=[Visual(geometry=arm_geom)])
 
     j1 = Joint("j1", JointType.FIXED, "base", "w1")
     j2 = Joint("j2", JointType.FIXED, "base", "w2")

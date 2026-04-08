@@ -8,36 +8,69 @@ from __future__ import annotations
 import typing
 
 import bpy
-from bpy.props import BoolProperty, EnumProperty, FloatProperty, PointerProperty, StringProperty
+from bpy.props import (
+    BoolProperty,
+    EnumProperty,
+    FloatProperty,
+    PointerProperty,
+    StringProperty,
+)
 from bpy.types import Context, PropertyGroup
 
-from ..utils.property_helpers import find_property_owner
+if typing.TYPE_CHECKING:
+    from .link_props import LinkPropertyGroup
+
+from linkforge_core.utils.string_utils import sanitize_name as sanitize_urdf_name
+
+from linkforge.blender.utils.property_helpers import find_property_owner
+from linkforge.blender.utils.scene_utils import clear_stats_cache
 
 
-def get_joint_name(self: typing.Any) -> str:
-    """Getter for joint_name - mirrors and sanitizes the Blender object name."""
+def get_joint_name(self: JointPropertyGroup) -> str:
+    """Getter for joint_name - returns the persistent URDF identity.
+
+    Args:
+        self: The JointPropertyGroup instance.
+
+    Returns:
+        The sanitized URDF name.
+    """
+    # Prioritize the stored identity to avoid Blender's .001 suffixing
+    if self.urdf_name_stored:
+        return str(self.urdf_name_stored)
+
     if not self.id_data:
         return ""
-
-    from .link_props import sanitize_urdf_name
 
     return sanitize_urdf_name(str(self.id_data.name))
 
 
-def set_joint_name(self: typing.Any, value: str) -> None:
-    """Setter for joint_name - updates object name."""
+def set_joint_name(self: JointPropertyGroup, value: str) -> None:
+    """Setter for joint_name - updates persistent identity and object name.
+
+    Args:
+        self: The JointPropertyGroup instance.
+        value: The new name value to set.
+    """
     if not value or not self.id_data:
         return
 
-    from .link_props import sanitize_urdf_name
-
+    # Sanitize joint name for URDF
     sanitized_name = sanitize_urdf_name(value)
 
+    # Store the persistent identity
+    self.urdf_name_stored = sanitized_name
+
+    # Update object name to match joint name
+    # Blender will handle collisions by appending suffixes, but our stored name persists
     if self.id_data.name != sanitized_name:
         self.id_data.name = sanitized_name
 
+    # Clear statistics cache when name changes
+    clear_stats_cache()
 
-def update_joint_hierarchy(self: typing.Any, context: Context) -> None:
+
+def update_joint_hierarchy(self: JointPropertyGroup, context: Context) -> None:
     """Update Blender object hierarchy when parent/child links change.
 
     Establishes hierarchy: parent_link → joint → child_link
@@ -51,7 +84,10 @@ def update_joint_hierarchy(self: typing.Any, context: Context) -> None:
     if joint_obj is None or not self.is_robot_joint:
         return
 
-    from ..utils.transform_utils import clear_parent_keep_transform, set_parent_keep_transform
+    from linkforge.blender.utils.transform_utils import (
+        clear_parent_keep_transform,
+        set_parent_keep_transform,
+    )
 
     # Parent-child objects directly from pointers
     parent_obj = self.parent_link
@@ -61,6 +97,11 @@ def update_joint_hierarchy(self: typing.Any, context: Context) -> None:
     if parent_obj:
         # Parent the Joint to the Parent Link
         set_parent_keep_transform(joint_obj, parent_obj)
+
+        # Move to parent's collection (organization)
+        from linkforge.blender.utils.scene_utils import sync_object_collections
+
+        sync_object_collections(joint_obj, parent_obj)
     elif joint_obj.parent:
         # Clear parent (unparent joint) while preserving world position
         clear_parent_keep_transform(joint_obj)
@@ -77,21 +118,22 @@ def update_joint_hierarchy(self: typing.Any, context: Context) -> None:
                 if (
                     obj.parent == joint_obj
                     and hasattr(obj, "linkforge")
-                    and typing.cast(typing.Any, obj).linkforge.is_robot_link
+                    and typing.cast("LinkPropertyGroup", obj.linkforge).is_robot_link
                 ):
                     # Clear parent while preserving world position
                     clear_parent_keep_transform(obj)
                     break  # Only unparent one child
 
+    # Clear statistics cache when hierarchy changes
+    clear_stats_cache(self, context)
 
-def poll_robot_link(self: typing.Any, obj: bpy.types.Object) -> bool:
+
+def poll_robot_link(_self: JointPropertyGroup, obj: bpy.types.Object) -> bool:
     """Filter to only allow robot link objects in pointer selection."""
-    return bool(
-        obj and hasattr(obj, "linkforge") and typing.cast(typing.Any, obj).linkforge.is_robot_link
-    )
+    return bool(hasattr(obj, "linkforge") and obj.linkforge.is_robot_link)
 
 
-def poll_robot_joint(self: typing.Any, obj: bpy.types.Object) -> bool:
+def poll_robot_joint(self: JointPropertyGroup, obj: bpy.types.Object) -> bool:
     """Filter to only allow other robot joint objects in pointer selection."""
     if not obj or obj.type != "EMPTY":
         return False
@@ -104,7 +146,7 @@ def poll_robot_joint(self: typing.Any, obj: bpy.types.Object) -> bool:
     # We compare the objects that own the properties
     # find_property_owner is imported at the top
     current_obj = find_property_owner(bpy.context, self, "linkforge_joint")
-    return obj != current_obj
+    return bool(obj != current_obj)
 
 
 class JointPropertyGroup(PropertyGroup):
@@ -117,12 +159,21 @@ class JointPropertyGroup(PropertyGroup):
         default=False,
     )
 
+    # Persistent URDF Identity
+    # Decouples logical URDF naming from physical Blender object names (resilient to .001 suffixes)
+    urdf_name_stored: StringProperty(  # type: ignore
+        name="URDF Name",
+        description="Persistent URDF name. Prevents mapping breakage if Blender renames the object",
+        default="",
+    )
+
     joint_name: StringProperty(  # type: ignore
         name="Joint Name",
         description="Name of the joint in URDF (must be unique)",
         maxlen=64,
         get=get_joint_name,
         set=set_joint_name,
+        update=clear_stats_cache,
     )
 
     # Joint type
@@ -138,6 +189,7 @@ class JointPropertyGroup(PropertyGroup):
             ("PLANAR", "Planar", "2D motion in a plane"),
         ],
         default="REVOLUTE",
+        update=clear_stats_cache,
     )
 
     # Parent and child links
@@ -357,7 +409,12 @@ def register() -> None:
         bpy.utils.unregister_class(JointPropertyGroup)
         bpy.utils.register_class(JointPropertyGroup)
 
-    bpy.types.Object.linkforge_joint = PointerProperty(type=JointPropertyGroup)  # type: ignore
+    prop_name = "linkforge_joint"
+    setattr(
+        bpy.types.Object,
+        prop_name,
+        typing.cast(typing.Any, PointerProperty(type=JointPropertyGroup)),
+    )
 
 
 def unregister() -> None:
@@ -365,7 +422,7 @@ def unregister() -> None:
     import contextlib
 
     with contextlib.suppress(AttributeError):
-        del bpy.types.Object.linkforge_joint  # type: ignore
+        delattr(bpy.types.Object, "linkforge_joint")
 
     with contextlib.suppress(RuntimeError):
         bpy.utils.unregister_class(JointPropertyGroup)

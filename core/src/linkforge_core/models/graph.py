@@ -10,7 +10,7 @@ import collections
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
-from ..exceptions import RobotModelError
+from ..exceptions import RobotValidationError, ValidationErrorCode
 
 if TYPE_CHECKING:
     from .joint import Joint
@@ -31,7 +31,7 @@ class KinematicGraph:
             joints: Collection of Joint objects forming the edges of the graph.
 
         Raises:
-            RobotModelError: If a joint references a link not present in the links collection.
+            RobotValidationError: If a joint references a link not present in the links collection.
         """
         self.link_names = {link.name for link in links}
         self.joints = list(joints)
@@ -43,12 +43,18 @@ class KinematicGraph:
 
         for joint in self.joints:
             if joint.parent not in self.link_names:
-                raise RobotModelError(
-                    f"Joint '{joint.name}' references unknown parent link '{joint.parent}'"
+                raise RobotValidationError(
+                    ValidationErrorCode.NOT_FOUND,
+                    f"Parent link '{joint.parent}' unknown",
+                    target="ParentLink",
+                    value=joint.parent,
                 )
             if joint.child not in self.link_names:
-                raise RobotModelError(
-                    f"Joint '{joint.name}' references unknown child link '{joint.child}'"
+                raise RobotValidationError(
+                    ValidationErrorCode.NOT_FOUND,
+                    f"Child link '{joint.child}' unknown",
+                    target="ChildLink",
+                    value=joint.child,
                 )
 
             self.adj[joint.parent].append((joint.child, joint.name))
@@ -149,10 +155,14 @@ class KinematicGraph:
             List of link names
 
         Raises:
-            RobotModelError: If a cycle is detected
+            RobotValidationError: If a cycle is detected
         """
         if self.has_cycle():
-            raise RobotModelError("Cannot provide topological order for a graph with cycles")
+            raise RobotValidationError(
+                ValidationErrorCode.HAS_CYCLE,
+                "Kinematic graph contains cycles",
+                target="CyclicGraph",
+            )
 
         order: list[str] = []
         # Implement Kahn's algorithm for topological sorting.

@@ -379,8 +379,8 @@ LinkForge uses **Release Please** to automate versioning and changelogs.
 ### Release Standards
 
 To maintain a professional and consistent appearance:
-- **Tagging**: Always use simple `v` prefixed tags (e.g., `v1.2.0`). This is handled automatically by the configuration.
-- **Release Titles**: Follow the format `v1.x.x: [Major Highlight]`. For example: `v1.2.0: Enhanced Sensor Suite & UI Refinement`.
+- **Tagging**: Always use simple `v` prefixed tags (e.g., `v1.3.0`). This is handled automatically by the configuration.
+- **Release Titles**: Follow the format `v1.x.x: [Major Highlight]`. For example: `v1.3.0: Performance & Control Refinement`.
 - **Changelog**: Use the project's custom sections (🚀 Features, 🐞 Bug Fixes, etc.) to keep notes organized.
 
 > [!NOTE]
@@ -404,12 +404,22 @@ While LinkForge supports `ros2_control`, it is designed to be distribution-agnos
 - **Compatibility**: We target compatibility with active ROS 2 LTS distributions (like Humble and Jazzy) and Rolling.
 - **Maintenance**: If the official `ros2_control` XML syntax changes in a newer ROS version, we update our generators to support those changes while maintaining backward compatibility.
 
+### 4. Validation Extensibility (Quality Control)
+To maintain the highest standards of robot description quality, LinkForge uses a **Modular Validation Registry**.
+- **The Rule**: Every new core model feature must be accompanied by a corresponding `ValidationCheck` in `core/src/linkforge_core/validation/checks.py`.
+- **Implementation**: Inherit from `ValidationCheck`, implement the `run()` method, and append your class to `RobotValidator.DEFAULT_CHECKS`.
+- **Testing**: Add isolated unit tests for your new check in `tests/unit/core/test_validation_checks.py`.
+
 ## Maintainer Expectations
 
 As a maintainer-driven project, we aim to be transparent about our availability and response times:
 
 - **Review Cycle**: Expect an initial response or feedback on PRs within **7 business days**.
 - **Issue Triage**: New issues are usually triaged during our weekly maintenance window (typically weekends).
+- **Issue Assignment & Progress**:
+    - If you are interested in an issue, please comment to ask for assignment.
+    - We value momentum. If an assigned issue has no activity (comments or PR) for **14 days**, we will check in.
+    - After **21 days** of inactivity, the issue may be unassigned to allow other contributors to help.
 - **Public Communication**: We prefer all discussions to happen in public issues or GitHub Discussions to ensure the community benefits from the shared knowledge.
 - **Decision Making**: For major architectural changes, we follow a consensus-based approach among core maintainers. If you are proposing a large change, please open a Discussion first to get early feedback.
 

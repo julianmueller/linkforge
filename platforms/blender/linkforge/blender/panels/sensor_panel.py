@@ -38,7 +38,7 @@ class LINKFORGE_PT_perceive(Panel):
             and obj.select_get()
             and obj.type == "EMPTY"
             and hasattr(obj, "linkforge_sensor")
-            and typing.cast(typing.Any, obj).linkforge_sensor.is_robot_sensor
+            and getattr(obj, "linkforge_sensor").is_robot_sensor
         )
 
         # Only show Create button when NOT editing a sensor
@@ -46,15 +46,12 @@ class LINKFORGE_PT_perceive(Panel):
             # Detect target link (either selected link or parent of selected visual)
             target_link = None
             if obj and obj.select_get():
-                if (
-                    hasattr(obj, "linkforge")
-                    and typing.cast(typing.Any, obj).linkforge.is_robot_link
-                ):
+                if hasattr(obj, "linkforge") and getattr(obj, "linkforge").is_robot_link:
                     target_link = obj
                 elif (
                     obj.parent
                     and hasattr(obj.parent, "linkforge")
-                    and typing.cast(typing.Any, obj.parent).linkforge.is_robot_link
+                    and getattr(obj.parent, "linkforge").is_robot_link
                 ):
                     # Selected object is a visual/collision child of a link
                     target_link = obj.parent
@@ -71,12 +68,19 @@ class LINKFORGE_PT_perceive(Panel):
         if not is_sensor or not obj:
             return
 
-        props = typing.cast(typing.Any, obj).linkforge_sensor
+        props = getattr(obj, "linkforge_sensor")
 
         # === SENSOR IDENTIFICATION ===
         box = layout.box()
         if box:
-            box.label(text=f"Sensor: {obj.name}", icon="OUTLINER_OB_CAMERA")
+            box.label(text=f"Sensor: {props.sensor_name}", icon="OUTLINER_OB_CAMERA")
+
+            # Display Blender object name if it differs from persistent sensor name
+            if obj.name != props.sensor_name:
+                sub = box.row()
+                sub.active = False
+                sub.label(text=f"Blender Obj: {obj.name}", icon="INFO")
+
             box.prop(props, "sensor_name")
             box.prop(props, "topic_name")  # Moved here for better UX
             box.prop(props, "sensor_type")

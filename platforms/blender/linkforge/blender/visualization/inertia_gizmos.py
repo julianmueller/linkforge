@@ -22,6 +22,7 @@ from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 
 from ..preferences import get_addon_prefs
+from ..utils.scene_utils import get_robot_statistics
 
 _builtin_shader_name = None
 
@@ -193,19 +194,18 @@ def draw_inertia_gizmos() -> None:
         all_line_positions = []
         all_line_colors = []
 
-        for obj in objects_to_draw:
-            # Check if it's a robot link
-            if not hasattr(obj, "linkforge") or not obj.linkforge.is_robot_link:
-                continue
+        # Use centralized scene statistics to avoid redundant scene traversing
+        stats = get_robot_statistics(context.scene)
 
-            # Only draw if Manual Inertia is active (Auto-Calculate is OFF)
-            if obj.linkforge.use_auto_inertia:
+        for obj in stats.manual_inertia_objects:
+            try:
+                axis_data = generate_inertia_axes_geometry(obj, axis_length=gizmo_size)
+                if axis_data["lines"]:
+                    all_line_positions.extend(axis_data["lines"])
+                    all_line_colors.extend(axis_data["line_colors"])
+            except ReferenceError:
+                # Object was deleted mid-draw or mid-frame
                 continue
-
-            axis_data = generate_inertia_axes_geometry(obj, axis_length=gizmo_size)
-            if axis_data["lines"]:
-                all_line_positions.extend(axis_data["lines"])
-                all_line_colors.extend(axis_data["line_colors"])
 
         if not all_line_positions:
             return
@@ -264,7 +264,7 @@ def ensure_inertia_handler() -> None:
         tag_redraw()
 
 
-def check_manual_inertia_on_load(dummy_a: Any = None, dummy_b: Any = None) -> float | None:
+def check_manual_inertia_on_load(_arg1: Any = None, _arg2: Any = None) -> Any:
     """Check if any link has Manual Inertia on file load or registration."""
     try:
         scene = bpy.context.scene
@@ -273,21 +273,12 @@ def check_manual_inertia_on_load(dummy_a: Any = None, dummy_b: Any = None) -> fl
     except (AttributeError, RuntimeError):
         return None
 
-    # Scan scene for any link with manual inertia
-    found_manual = False
-    for obj in scene.objects:
-        if (
-            hasattr(obj, "linkforge")
-            and obj.linkforge.is_robot_link
-            and not obj.linkforge.use_auto_inertia
-        ):
-            found_manual = True
-            break
-
-    if found_manual:
+    # Scan scene for any link with manual inertia using centralized statistics
+    stats = get_robot_statistics(scene)
+    if stats.manual_inertia_objects:
         ensure_inertia_handler()
 
-    return None  # For timer compliance
+    return None
 
 
 def register() -> None:
@@ -295,7 +286,7 @@ def register() -> None:
     # Register load handler to scan for manual inertia usage on file open
     if check_manual_inertia_on_load not in bpy.app.handlers.load_post:
         # Load post handlers receive (None, None) or (filepath, None)
-        bpy.app.handlers.load_post.append(typing.cast(typing.Any, check_manual_inertia_on_load))
+        bpy.app.handlers.load_post.append(check_manual_inertia_on_load)
 
     # Also check current scene immediately (handles "enable addon" case)
     # Use timer to let context initialize if needed
@@ -308,7 +299,7 @@ def unregister() -> None:
 
     # Remove load handler
     if check_manual_inertia_on_load in bpy.app.handlers.load_post:
-        bpy.app.handlers.load_post.remove(typing.cast(typing.Any, check_manual_inertia_on_load))
+        bpy.app.handlers.load_post.remove(check_manual_inertia_on_load)
 
     # Remove draw handler
     if _draw_handle is not None:

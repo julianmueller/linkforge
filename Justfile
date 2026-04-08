@@ -1,6 +1,7 @@
 # LinkForge Developer Commands
 # Standardizes workflows across macOS, Linux, and Windows
 
+
 # Default: List available commands
 default:
     @just --list
@@ -13,6 +14,10 @@ build: build-blender
 # Build Blender Extension
 build-blender:
     uv run python platforms/blender/scripts/build.py
+
+# Sync Blender dependencies (downloads platform-specific wheels)
+sync:
+    uv run python platforms/blender/scripts/build.py sync
 
 # --- Test ---
 
@@ -35,8 +40,6 @@ coverage:
 	uv run coverage combine
 	uv run coverage html
 	uv run coverage report
-
-# --- Quality ---
 
 # Run all quality checks
 check: lint type-check

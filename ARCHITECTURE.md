@@ -103,10 +103,10 @@ graph TB
 | Module | Purpose |
 |--------|----------|
 | **Models** | Core data structures (`Robot`, `Link`, `Joint`, `Sensor`, `Ros2Control`, `Transmission`, `GazeboElement`) |
-| **Parsers** | URDF/XACRO → Python objects |
-| **Generators** | Python objects → URDF/XACRO |
-| **Physics** | Mass & inertia calculations |
-| **Validation** | Error checking & security |
+| **Parsers** | URDF/XACRO parsing |
+| **Generators** | Shared XML engine & format-specific generation (URDF, XACRO, etc.) |
+| **Physics** | Inertia & dynamics |
+| **Validation** | Modular checks & security registry |
 | **Utils** | Shared internal logic (math, strings, XML, kinematics) |
 
 ## Data Flow
@@ -177,10 +177,14 @@ classDiagram
     class Robot {
         +str name
         +str version
-        +list~Sensor~ sensors
-        +list~Transmission~ transmissions
-        +list~Ros2Control~ ros2_controls
-        +list~GazeboElement~ gazebo_elements
+        +list~Link~ links (read-only)
+        +list~Joint~ joints (read-only)
+        +list~Sensor~ sensors (read-only)
+        +list~Transmission~ transmissions (read-only)
+        +list~Ros2Control~ ros2_controls (read-only)
+        +list~GazeboElement~ gazebo_elements (read-only)
+        +dict metadata
+        +IResourceResolver resource_resolver
         +add_link(link)
         +add_joint(joint)
         +add_sensor(sensor)
@@ -191,9 +195,11 @@ classDiagram
 
     class Link {
         +str name
-        +list~Visual~ visuals
-        +list~Collision~ collisions
+        +list~Visual~ visuals (read-only)
+        +list~Collision~ collisions (read-only)
         +Inertial inertial
+        +add_visual(visual)
+        +add_collision(collision)
     }
 
     class Inertial {
@@ -355,7 +361,7 @@ classDiagram
     }
 
     class Mesh {
-        +Path filepath
+        +str resource
         +Vector3 scale
     }
 
@@ -369,34 +375,66 @@ classDiagram
     Geometry <|-- Cylinder
     Geometry <|-- Sphere
     Geometry <|-- Mesh
+
+    class IResourceResolver {
+        <<interface>>
+        +resolve(uri, relative_to) Path
+    }
+
+    class FileSystemResolver {
+        +resolve(uri, relative_to) Path
+    }
+
+    IResourceResolver <|-- FileSystemResolver
+    Robot "1" *-- "1" IResourceResolver
 ```
 
 ## Key Design Patterns
 
-### 1. **Immutable Data Models**
-All core models use `@dataclass(frozen=True)` for thread safety and predictable behavior.
+### 1. **Encapsulated Data Models**
+Core models use a combination of `InitVar` for initialization and controlled access to internal collections via read-only properties. This pattern ensures that model state remains consistent and changes are properly indexed (especially in the `Robot` model).
 
 ```python
-@dataclass(frozen=True)
+@dataclass
 class Link:
     name: str
-    visuals: list[Visual]
-    collisions: list[Collision]
-    inertial: Inertial | None
+    initial_visuals: InitVar[Sequence[Visual] | None] = None
+    initial_collisions: InitVar[Sequence[Collision] | None] = None
+    inertial: Inertial | None = None
+
+    @property
+    def visuals(self) -> Sequence[Visual]:
+        return tuple(self._visuals)
 ```
 
-### 2. **Validation at Construction**
-Models validate themselves in `__post_init__()` to ensure data integrity.
+### 2. **Validation Registry**
+
+The system uses a modular validation registry. `RobotValidator` acts as a thin orchestrator that runs a configurable list of `ValidationCheck` instances.
+
+**Design Principles:**
+- **Encapsulation**: Each check (e.g., `MimicChainCheck`, `TreeStructureCheck`) is isolated and focus on one specific rule.
+- **Injectability**: Callers can inject a custom list of checks for targeted validation (e.g., during interactive modeling).
+- **Statelessness**: Checks write results to a shared `ValidationResult` object, ensuring thread safety and clear data flow.
+
+### 3. **Validation at Construction**
+Models validate their identity and structural integrity in `__post_init__()`. Complex validation (e.g. kinematic tree connectivity) is delegated to the `RobotValidator`.
 
 ```python
-def __post_init__(self) -> None:
+def __post_init__(
+    self,
+    initial_visuals: Sequence[Visual] | None = None,
+    initial_collisions: Sequence[Collision] | None = None,
+) -> None:
     if not self.name:
         raise RobotModelError("Link name cannot be empty")
-    if self.inertial and self.inertial.mass <= 0:
-        raise RobotModelError("Mass must be positive")
+
+    if initial_visuals:
+        self._visuals.extend(initial_visuals)
+    if initial_collisions:
+        self._collisions.extend(initial_collisions)
 ```
 
-### 3. **Resilient Parsing & Duplicate Resolution**
+### 4. **Resilient Parsing & Duplicate Resolution**
 Parser logic is designed to be highly resilient to malformed or non-compliant URDFs.
 - **Graceful Failure**: Individual invalid elements (e.g., malformed joints) are skipped with warnings rather than halting the process.
 - **Duplicate Resolution**: If duplicate link or joint names are detected, LinkForge automatically renames them (e.g., `link_duplicate_1`) to preserve kinematic integrity while maintaining compliance with Blender/Core unique naming requirements.
@@ -421,14 +459,14 @@ As an extensible framework, LinkForge is designed with clear "hooks" for adding 
 To support a new sensor (e.g., a custom LiDAR or Depth Camera variant):
 1. **Model**: Add enum to `SensorType` and create a metadata dataclass in `linkforge_core/models/sensor.py`.
 2. **Parser**: Update `URDFParser._parse_sensor` in `linkforge_core/parsers/urdf_parser.py`.
-3. **Generator**: Add XML mapping in `linkforge_core/generators/urdf_generator.py`.
+3. **Generator**: Add XML mapping in `linkforge_core/generators/xml_base.py` for shared logic or in `urdf_generator.py` for format-specific tags.
 4. **UI**: Add property group and panel logic in `blender/properties/sensor_props.py` and `blender/panels/sensor_panel.py`.
 
 ### Adding New Joint Types
 To implement experimental joint types (e.g., screw joints or custom bushings):
 1. **Model**: Add enum to `JointType` in `linkforge_core/models/joint.py`.
 2. **Validation**: Update `Joint.__post_init__` for type-specific constraints.
-3. **Parser/Generator**: Update the corresponding logic in `urdf_parser.py` and `urdf_generator.py`.
+3. **Parser/Generator**: Update parsing in `urdf_parser.py` and generation in `xml_base.py` (shared) or `urdf_generator.py` (URDF-specific tags).
 4. **Gizmos**: Add custom drawing logic in `blender/visualization/joint_gizmos.py`.
 
 ### Adding New Mesh Formats
@@ -436,6 +474,13 @@ To support additional 3D formats (e.g., USD or PLY):
 1. **Core**: Ensure `Mesh` model handles paths correctly in `linkforge_core/models/geometry.py`.
 2. **Blender Logic**: Implement the export wrapper in `blender/adapters/mesh_io.py`.
 3. **UI/Export**: Add the format option to the global `RobotPropertyGroup` in `blender/properties/robot_props.py`.
+
+### Adding New Robotics Formats (SDF, MuJoCo, etc.)
+To support a completely new robotics format:
+1. **Inheritance**: Create a new class (e.g., `MJCFGenerator`) inheriting from `RobotXMLGenerator` in `linkforge_core/generators/`.
+2. **Formatting Hooks**: Override `_format_value` and `_format_vector` if the format uses non-standard numeric representations (e.g., MuJoCo's space-separated attributes).
+3. **Tag Overrides**: Implement `_add_geometry_element` or other XML hooks to match the target format's schema (e.g., `<geom>` for MuJoCo instead of `<geometry>`).
+4. **Implementation**: Define the top-level `generate` method to orchestrate the robot element and section creation.
 
 ## Performance Considerations
 
@@ -470,18 +515,22 @@ graph TB
 
 Comprehensive execution instructions and setup details for each layer are maintained in the **[CONTRIBUTING.md](https://github.com/arounamounchili/linkforge/blob/main/CONTRIBUTING.md#testing)** guide.
 
+### 7. Unified Resource Resolution
+LinkForge uses a unified resolver architecture to handle external assets (`package://`, `file://`, and relative paths). This ensures that robot models remain portable between different environments (ROS, local filesystem, or future cloud storage).
+
 ## Security by Design
 
 LinkForge implements a multi-layered security architecture to protect against malicious URDF/XACRO inputs:
 
-1. **Sandboxed I/O**: The **Sandbox Root** auto-detection prevents path traversal attacks by restricting mesh asset access to the robot's package directory.
-2. **Resource Throttling**: Hard limits on file size (100MB), XML nesting depth (100), and numeric ranges (±1e10) protect against "Billion Laughs" attacks and system resource exhaustion.
-3. **Atomic Sanitization**: All incoming strings (links, joints, meshes) are sanitized at the engine's edge to ensure validity for both URDF XML and cross-platform filesystems.
-4. **Validation Pass**: The `RobotValidator` performs a pre-export sanity check to ensure kinematic connectivity and physical property validity.
+1. **Sandboxed I/O**: The **FileSystemResolver** implements sandbox protection by restricting access to a validated root directory (usually the robot's package or URDF folder).
+2. **URI Validation**: Standardized security helpers validate `package://` and `file://` URIs to prevent path traversal attacks before resolution occurs.
+3. **Resource Throttling**: Hard limits on file size (100MB), XML nesting depth (100), and numeric ranges (±1e10) protect against "Billion Laughs" attacks and system resource exhaustion.
+4. **Atomic Sanitization**: All incoming strings (links, joints, meshes) are sanitized at the engine's edge to ensure validity for both URDF XML and cross-platform filesystems.
+5. **Validation Pass**: The `RobotValidator` runs a comprehensive suite of modular `ValidationChecks` to ensure kinematic connectivity, cycle-free mimic chains, and physical property validity.
 
 
 
 ---
 
-**Last Updated:** 2026-02-19
-**Version:** 1.2.3
+**Last Updated:** 2026-03-10
+**Version:** 1.5.0

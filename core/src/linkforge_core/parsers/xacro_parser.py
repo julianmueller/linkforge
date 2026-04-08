@@ -13,15 +13,26 @@ import os
 import re
 import sys
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-import yaml  # type: ignore
+try:
+    import yaml  # type: ignore[import-untyped]
+except ImportError:
+    yaml = None
 
-from ..base import RobotParser, RobotParserError
+from ..base import RobotParser
+from ..exceptions import (
+    RobotParserError,
+    RobotXacroError,
+    RobotXacroExpressionError,
+    RobotXacroRecursionError,
+)
 from ..logging_config import get_logger
 from ..models.robot import Robot
+from ..utils.dict_utils import AttrDict
 from ..utils.path_utils import resolve_package_path
 
 logger = get_logger(__name__)
@@ -33,6 +44,7 @@ XACRO_URIS = [
     "http://wiki.ros.org/xacro",
 ]
 
+_DUNDER_PATTERN: re.Pattern[str] = re.compile(r"__\w+__")
 
 # Safe math context for evaluations
 MATH_CONTEXT: dict[str, Any] = {
@@ -52,6 +64,29 @@ MATH_CONTEXT["__builtins__"] = {
     "dict": dict,
     "bool": bool,
 }
+# Standard XACRO booleans
+MATH_CONTEXT["true"] = True
+MATH_CONTEXT["false"] = False
+
+
+@dataclass
+class XacroTemplate:
+    """A pre-parsed structural template of a XACRO file.
+
+    This represents the 'Structural Phase' of XACRO resolution where all
+    includes are expanded and files are parsed into memory, but no
+    substitutions or macro calls have been evaluated yet.
+    """
+
+    filepath: Path
+    root_tag: str
+    root_attrib: dict[str, str]
+    container: ET.Element  # Container of pre-resolved elements
+    macros: dict[str, tuple[list[str], ET.Element]]
+
+
+# Global cache for structural templates to speed up repeated assembly of identical robots.
+TEMPLATE_CACHE: dict[Path, XacroTemplate] = {}
 
 
 class XacroResolver:
@@ -63,6 +98,13 @@ class XacroResolver:
         max_depth: int = 50,
         start_dir: Path | None = None,
     ) -> None:
+        """Initialize the XACRO resolver.
+
+        Args:
+            search_paths: List of additional directories to search for includes.
+            max_depth: Maximum recursion depth for macro expansions and includes.
+            start_dir: Base directory for resolving package:// URIs and relative paths.
+        """
         self.search_paths = search_paths or []
         self.start_dir = start_dir
         self.properties: dict[str, Any] = {}
@@ -76,20 +118,36 @@ class XacroResolver:
             set()
         )  # Track active block insertions to prevent infinite recursion
 
-        # Per-instance evaluation context to allow file-aware data loading
+        # Shared evaluation context (load functions and standard arg)
         self.eval_context = MATH_CONTEXT.copy()
-        # Add 'load_yaml' and 'load_json' for top-level use
         self.eval_context["load_yaml"] = self._handle_load_yaml
         self.eval_context["load_json"] = self._handle_load_json
+        self.eval_context["arg"] = self._handle_arg_eval
 
-        # Add 'xacro' namespace for ROS-standard compliance (e.g. xacro.load_yaml)
+        # ROS-standard 'xacro' namespace
         xacro_ns = SimpleNamespace()
         xacro_ns.load_yaml = self._handle_load_yaml
         xacro_ns.load_json = self._handle_load_json
+        xacro_ns.arg = self._handle_arg_eval
+        xacro_ns.warning = logger.warning
+        xacro_ns.error = logger.error
+        xacro_ns.fatal = logger.critical
+        xacro_ns.message = logger.info
         self.eval_context["xacro"] = xacro_ns
 
     def resolve_file(self, filepath: Path) -> str:
-        """Resolve a XACRO file and return URDF string."""
+        """Resolve a XACRO file and return the final URDF string.
+
+        Args:
+            filepath: Path to the XACRO file to resolve.
+
+        Returns:
+            The fully resolved URDF XML as a string.
+
+        Raises:
+            RobotXacroError: If resolution fails or internal error occurs
+            RobotXacroRecursionError: If circular dependencies are found
+        """
         # Deeply nested XACRO files can exceed Python's default recursion limit (usually 1000)
         # We temporarily boost it to ensure we can handle complex industrial robots
         # (e.g. mobile_fr3_duo has very deep macro expansions)
@@ -104,74 +162,154 @@ class XacroResolver:
             self.start_dir = filepath.parent
 
         try:
-            container, root_tag, root_attrib = self._process_include_file(filepath)
+            template = self._get_structural_template(filepath)
 
-            # Create a new robot root from the processed elements
             # Standard URDF requires a <robot> root tag
+            # Create URDF root preserving original name and attributes from the template
+            out_root = ET.Element(template.root_tag, template.root_attrib)
 
-            # Create URDF root preserving original name and attributes
-            out_root = ET.Element(root_tag, root_attrib)
+            # Copy template macros into our active resolver
+            self.macros.update(copy.deepcopy(template.macros))
+
+            # Evaluation Phase: Process the structural container
+            # We deepcopy the container to ensure this evaluation doesn't mutate the cache.
+            resolved_container = self.resolve_element(copy.deepcopy(template.container))
 
             # Helper to flatten container and filter items
             def _append_filtered(parent: ET.Element, items: list[ET.Element] | ET.Element) -> None:
                 if isinstance(items, ET.Element):
-                    items = [items]  # pragma: no cover
+                    items = [items]
 
                 for item in items:
                     if item.tag == "container":
                         # Flatten container
-                        _append_filtered(parent, list(item))  # pragma: no cover
+                        _append_filtered(parent, list(item))
                     elif item.tag != "skip" and not item.tag.startswith("xacro:"):
                         # Add valid element
                         parent.append(item)
 
-            _append_filtered(out_root, list(container))
+            _append_filtered(out_root, list(resolved_container))
 
             return self._finalize_urdf(out_root)
         except Exception as e:
             if isinstance(e, RobotParserError):
                 raise
-            raise RobotParserError(f"XACRO resolution failed for {filepath}: {e}") from e
+            raise RobotXacroError(str(e), context=str(filepath)) from e
         finally:
             if sys.getrecursionlimit() != old_limit:
                 sys.setrecursionlimit(old_limit)
 
-    def _process_include_file(
-        self, filepath: Path, ns: str | None = None
-    ) -> tuple[ET.Element, str, dict[str, str]]:
-        """Process a file path, handling includes and circular detection."""
-        filepath = filepath.resolve()
+    def resolve_string(self, xml_string: str) -> str:
+        """Resolve a XACRO string and return the final XML string.
 
+        Args:
+            xml_string: The XACRO XML content as a string.
+
+        Returns:
+            The fully resolved XML as a string.
+
+        Raises:
+            RobotXacroError: If XML is malformed or resolution fails
+        """
+        old_limit = sys.getrecursionlimit()
+        if old_limit < RECURSION_LIMIT_BOOST:
+            sys.setrecursionlimit(RECURSION_LIMIT_BOOST)
+
+        try:
+            root = ET.fromstring(xml_string)
+            resolved_root = self.resolve_element(root)
+
+            # finalize_urdf expects an ET.Element and handles cleanup of xacro artifacts
+            return self._finalize_urdf(resolved_root)
+        except Exception as e:
+            if isinstance(e, RobotParserError):
+                raise
+            raise RobotXacroError(str(e), context="string resolution") from e
+        finally:
+            if sys.getrecursionlimit() != old_limit:
+                sys.setrecursionlimit(old_limit)
+
+    def _get_structural_template(self, filepath: Path) -> XacroTemplate:
+        """Retrieve or build a structural template for a file.
+
+        Args:
+            filepath: Path to the XACRO file.
+
+        Returns:
+            The cached or newly built structural template.
+
+        Raises:
+            RobotXacroRecursionError: If circular includes are detected
+            RobotXacroError: If XML parsing fails or files cannot be located
+        """
+        filepath = filepath.resolve()
+        if filepath in TEMPLATE_CACHE:
+            return TEMPLATE_CACHE[filepath]
+
+        logger.debug(f"XACRO: Building structural template for {filepath.name}")
+
+        # Cycle detection for includes during template build
         if filepath in self._file_stack:
-            chain = " -> ".join([f.name for f in self._file_stack] + [filepath.name])
-            raise RobotParserError(f"Circular XACRO include detected: {chain}")
+            raise RobotXacroRecursionError(str(filepath.name))
 
         self._file_stack.append(filepath)
-
         try:
             tree = ET.parse(filepath)
             root = tree.getroot()
-
-            if ns:
-                self._ns_stack.append(ns)
 
             # Store search path for relative includes within this file
             old_paths = self.search_paths[:]
             if filepath.parent not in self.search_paths:
                 self.search_paths.insert(0, filepath.parent)
 
+            structural_macros: dict[str, tuple[list[str], ET.Element]] = {}
             container = ET.Element("container")
+
             for child in root:
-                resolved_child = self.resolve_element(child)
-                if resolved_child.tag == "container":
-                    for sc in resolved_child:
-                        container.append(sc)
-                elif resolved_child.tag != "skip":
-                    container.append(resolved_child)
+                # Basic tagging of XACRO elements
+                tag = child.tag
+                for uri in XACRO_URIS:
+                    prefix = f"{{{uri}}}"
+                    if tag.startswith(prefix):
+                        tag = tag.replace(prefix, "xacro:")
+                        break
+
+                if tag == "xacro:include":
+                    # Handle structural inclusion
+                    # filename may depend on $(arg) or ${}, so we substitute using current context
+                    filename = str(self._substitute(child.get("filename") or ""))
+                    ns = child.get("ns")
+                    inc_path = self._find_file(filename)
+
+                    if inc_path:
+                        inc_template = self._get_structural_template(inc_path)
+                        structural_macros.update(inc_template.macros)
+
+                        # If namespaced, we wrap the included elements but keep them structural
+                        if ns:
+                            ns_container = ET.Element("container", ns=ns)
+                            for sc in inc_template.container:
+                                ns_container.append(sc)
+                            container.append(ns_container)
+                        else:
+                            for sc in inc_template.container:
+                                container.append(sc)
+                    else:
+                        logger.warning(f"XACRO: Could not find included file: '{filename}'")
+                elif tag == "xacro:macro":
+                    # Collect macro definition but do not expand
+                    name = child.get("name")
+                    params_str = child.get("params") or ""
+                    # Quick split (the resolver will do the full smart split during evaluation)
+                    params = [p.strip() for p in params_str.split(",") if p.strip()]
+                    if name:
+                        structural_macros[name] = (params, child)
+                    container.append(child)
+                else:
+                    # Keep all other elements (properties, conditionals, URDF tags) as is
+                    container.append(child)
 
             self.search_paths = old_paths
-            if ns:
-                self._ns_stack.pop()
 
             # Clean root attributes (remove xacro namespace)
             clean_attrib = {
@@ -180,33 +318,37 @@ class XacroResolver:
                 if not k.startswith("{http://www.ros.org/wiki/xacro}")
             }
 
-            return container, root.tag, clean_attrib
+            template = XacroTemplate(
+                filepath=filepath,
+                root_tag=root.tag,
+                root_attrib=clean_attrib,
+                container=container,
+                macros=structural_macros,
+            )
+
+            TEMPLATE_CACHE[filepath] = template
+            return template
 
         except ET.ParseError as e:
-            raise RobotParserError(f"Malformed XACRO XML in {filepath}: {e}") from e
-        except Exception as e:
-            if isinstance(e, RobotParserError):
-                raise
-            raise RobotParserError(f"Failed to process XACRO file {filepath}: {e}") from e
+            raise RobotXacroError(str(e), context=str(filepath)) from e
         finally:
             self._file_stack.pop()
 
     def resolve_element(self, element: ET.Element) -> ET.Element:
-        """Process a single element recursively."""
+        """Process a single element recursively, tracking depth.
+
+        Args:
+            element: The XML element to resolve.
+
+        Returns:
+            The resolved XML element or a container.
+
+        Raises:
+            RobotXacroRecursionError: If maximum recursion depth is exceeded
+        """
         self._current_depth += 1
         if self._current_depth > self.max_depth:
-            stack_info = ""
-            if self._file_stack:
-                stack_info = f" (File stack: {' -> '.join([f.name for f in self._file_stack])})"
-
-            elem_info = f"Element: <{element.tag}"
-            if "name" in element.attrib:
-                elem_info += f" name='{element.get('name')}'"
-            elem_info += ">"
-
-            raise RobotParserError(
-                f"Maximum XACRO recursion depth ({self.max_depth}) exceeded at {elem_info}{stack_info}. This usually indicates a circular include or infinite macro loop."
-            )
+            raise RobotXacroRecursionError(self.max_depth)
 
         try:
             return self._resolve_element_impl(element)
@@ -214,7 +356,14 @@ class XacroResolver:
             self._current_depth -= 1
 
     def _resolve_element_impl(self, element: ET.Element) -> ET.Element:
-        """Core recursive resolution logic."""
+        """Core recursive resolution logic for a single XML element.
+
+        Args:
+            element: The element to dispatch for processing.
+
+        Returns:
+            The resolved XML element.
+        """
         # Convert any recognized XACRO namespace URI to 'xacro:' prefix
         tag = element.tag
         for uri in XACRO_URIS:
@@ -223,183 +372,325 @@ class XacroResolver:
                 tag = tag.replace(prefix, "xacro:")
                 break
 
-        # 1. Handle properties: <xacro:property name="..." value="..."/>
-        if tag == "xacro:property":
-            name = element.get("name")
-            value = element.get("value")
-            if name:
-                # Apply namespace prefix if active
-                if self._ns_stack:
-                    name = f"{'.'.join(self._ns_stack)}.{name}"
+        # Dispatch dictionary for known xacro tags
+        dispatch = {
+            "xacro:property": self._handle_property,
+            "xacro:arg": self._handle_arg,
+            "xacro:include": self._handle_include,
+            "xacro:macro": self._handle_macro_def,
+            "xacro:if": self._handle_conditional,
+            "xacro:unless": self._handle_conditional,
+            "xacro:insert_block": self._handle_insert_block,
+        }
 
-                # If no 'value' attribute, check for children (block property)
-                if value is None and len(element) > 0:
-                    self.properties[name] = list(element)
-                else:
-                    self.properties[name] = self._try_parse_typed_value(
-                        self._substitute(value or element.text or "")
-                    )
-            return ET.Element("skip")
+        if tag in dispatch:
+            return dispatch[tag](element)
 
-        # 2. Handle arguments: <xacro:arg name="..." default="..."/>
-        if tag == "xacro:arg":
-            name = element.get("name")
-            default = element.get("default")
-            if name and name not in self.args:
-                self.args[name] = self._try_parse_typed_value(self._substitute(default or ""))
-            return ET.Element("skip")
-
-        # 3. Handle includes: <xacro:include filename="..." ns="..."/>
-        if tag == "xacro:include":
-            filename = str(self._substitute(element.get("filename") or ""))
+        if tag == "container":
             ns = element.get("ns")
-            included_path = self._find_file(filename)
-            if not included_path:
-                logger.warning(
-                    f"XACRO: Could not find included file: '{filename}'. Check your paths and $(find ...) usage."
-                )
-                return ET.Element("skip")
+            if ns:
+                self._ns_stack.append(ns)
 
-            container, _, _ = self._process_include_file(included_path, ns=ns)
-            return container
+            new_container = ET.Element("container")
+            for child in element:
+                resolved_child = self.resolve_element(child)
+                if resolved_child.tag == "container":
+                    for sc in resolved_child:
+                        new_container.append(sc)
+                elif resolved_child.tag != "skip":
+                    new_container.append(resolved_child)
 
-        # 4. Handle macro definitions: <xacro:macro name="..." params="...">
-        if tag == "xacro:macro":
-            name = element.get("name")
-            params = [p.strip() for p in (element.get("params") or "").split() if p.strip()]
-            if name:
-                # Apply namespace prefix if active
-                if self._ns_stack:
-                    name = f"{'.'.join(self._ns_stack)}.{name}"
-                self.macros[name] = (params, element)
-            return ET.Element("skip")
+            if ns:
+                self._ns_stack.pop()
+            return new_container
 
-        # 5. Handle conditionals: <xacro:if value="..."/> or <xacro:unless value="..."/>
-        if tag in ("xacro:if", "xacro:unless"):
-            condition = element.get("value") or "0"
-            is_true = self._eval_condition(condition)
-            if tag == "xacro:unless":
-                is_true = not is_true
-
-            if is_true:
-                container = ET.Element("container")
-                for child in element:
-                    resolved_child = self.resolve_element(child)
-                    if resolved_child.tag == "container":
-                        for sc in resolved_child:
-                            container.append(sc)
-                    elif resolved_child.tag != "skip":
-                        container.append(resolved_child)
-                return container
-            return ET.Element("skip")
-
-        # 6. Handle block insertion: <xacro:insert_block name="..."/>
-        if tag == "xacro:insert_block":
-            name = str(self._substitute(element.get("name") or ""))
-            if name and name in self.properties:
-                # Cycle detection for blocks
-                if name in self._block_stack:
-                    raise RobotParserError(
-                        f"Circular block insertion detected: {name}. This causes infinite recursion."
-                    )
-
-                self._block_stack.add(name)
-                try:
-                    block = self.properties[name]
-                    if isinstance(block, (ET.Element, list)):
-                        # It's an XML block
-                        # CRITICAL: We must deepcopy the block before insertion!
-                        # Otherwise, if a block refers to itself (directly or via macro),
-                        # we create a cycle in the Python object graph that causes infinite recursion.
-                        container = ET.Element("container")
-
-                        def _process_block_item(item: ET.Element) -> None:
-                            res = self.resolve_element(copy.deepcopy(item))
-                            if res.tag == "container":
-                                for child in res:
-                                    container.append(child)
-                            elif res.tag != "skip":
-                                container.append(res)
-
-                        if isinstance(block, ET.Element):
-                            # Single element
-                            _process_block_item(block)
-                        else:
-                            # List of elements (usual case for block params)
-                            for b_elem in block:
-                                _process_block_item(b_elem)
-
-                        return container
-                finally:
-                    self._block_stack.remove(name)
-            return ET.Element("skip")
-
-        # 7. Handle macro calls
         if tag.startswith("xacro:"):
-            if tag[6:] in self.macros:
-                params, macro_elem = self.macros[tag[6:]]
-                local_props: dict[str, Any] = {}
+            return self._handle_macro_call(tag, element)
 
-                # Parse parameters
-                block_params = [p[1:] for p in params if p.startswith("*")]
-                regular_params = [p for p in params if not p.startswith("*")]
+        return self._handle_regular_element(element)
 
-                # Map children to block parameters (simplified: all children to all block params)
-                # CRITICAL: We must resolve the block content in the CALLER'S scope before passing it
-                # to the macro. Otherwise, if we pass a "lazy" insert_block instruction,
-                # and the macro uses the same parameter name, we create an infinite loop.
-                resolved_block_content: list[ET.Element] = []
-                for child in element:
-                    # Resolve child in current scope
-                    # We use deepcopy to ensure we don't modify the original definition
-                    res = self.resolve_element(copy.deepcopy(child))
-                    if res.tag == "container":
-                        resolved_block_content.extend(res)
-                    elif res.tag != "skip":
-                        resolved_block_content.append(res)
+    def _handle_property(self, element: ET.Element) -> ET.Element:
+        """Handle property definitions: <xacro:property name="..." value="..."/>.
 
-                for bp in block_params:
-                    local_props[bp] = resolved_block_content
+        Args:
+            element: The XACRO property XML element.
 
-                # Map attributes to regular parameters
-                for p in regular_params:
-                    # Handle default values in params (e.g. "mass:=1.0")
-                    bits = p.split(":=")
-                    p_name = bits[0]
-                    # Substitute the default value from the parameter definition
-                    default = self._try_parse_typed_value(
-                        self._substitute(bits[1] if len(bits) > 1 else "")
-                    )
+        Returns:
+            A 'skip' element as properties are consumed during resolution.
+        """
+        name = element.get("name")
+        value = element.get("value")
+        if name:
+            # Apply namespace prefix if active
+            if self._ns_stack:
+                name = f"{'.'.join(self._ns_stack)}.{name}"
 
-                    raw_val = element.get(p_name)
-                    val = self._substitute(raw_val) if raw_val is not None else default
+            # If no 'value' attribute, check for children (block property)
+            if value is None and len(element) > 0:
+                self.properties[name] = list(element)
+            else:
+                self.properties[name] = self._try_parse_typed_value(
+                    self._substitute(value or element.text or "")
+                )
+        return ET.Element("skip")
 
-                    local_props[p_name] = self._try_parse_typed_value(val)
+    def _handle_arg(self, element: ET.Element) -> ET.Element:
+        """Handle argument definitions: <xacro:arg name="..." default="..."/>.
 
-                # Expand macro body
-                parent_props = self.properties.copy()
-                self.properties.update(local_props)
+        Args:
+            element: The XACRO arg XML element.
 
-                container = ET.Element("container")
-                for child in macro_elem:
-                    resolved_child = self.resolve_element(child)
-                    if resolved_child.tag == "container":
-                        for sc in resolved_child:
-                            container.append(sc)
-                    elif resolved_child.tag != "skip":
-                        container.append(resolved_child)
+        Returns:
+            A 'skip' element as args are consumed during resolution.
+        """
+        name = element.get("name")
+        default = element.get("default")
+        if name and name not in self.args:
+            self.args[name] = self._try_parse_typed_value(self._substitute(default or ""))
+        return ET.Element("skip")
 
-                self.properties = parent_props
-                return container
+    def _handle_include(self, element: ET.Element) -> ET.Element:
+        """Handle file includes: <xacro:include filename="..." ns="..."/>.
 
-            # Unknown xacro tag - report warning and skip it
-            macro_name = tag[6:]
+        Args:
+            element: The XACRO include XML element.
+
+        Returns:
+            A container element containing the resolved included content.
+        """
+        filename = str(self._substitute(element.get("filename") or ""))
+        ns = element.get("ns")
+        included_path = self._find_file(filename)
+
+        if not included_path:
             logger.warning(
-                f"XACRO: Unknown macro or tag: '{macro_name}'. Did you forget to include the corresponding file?"
+                f"XACRO: Could not find included file: '{filename}'. Check your paths and $(find ...) usage."
             )
             return ET.Element("skip")
 
-        # 8. Handle substitutions in text and attributes for regular elements
+        template = self._get_structural_template(included_path)
+
+        # Merge template macros into current context
+        # Skip namespaced macros here; they will be handled by the container evaluation phase
+        if not ns:
+            self.macros.update(copy.deepcopy(template.macros))
+
+        if ns:
+            self._ns_stack.append(ns)
+
+        # Evaluate the template container in current context
+        # We use resolve_element on a deepcopy to prevent per-instance pollution of the cache.
+        container = self.resolve_element(copy.deepcopy(template.container))
+
+        if ns:
+            self._ns_stack.pop()
+
+        return container
+
+    def _handle_macro_def(self, element: ET.Element) -> ET.Element:
+        """Handle macro definitions: <xacro:macro name="..." params="...">.
+
+        Args:
+            element: The XACRO macro XML element.
+
+        Returns:
+            A 'skip' element as macro definitions are cached for later calls.
+        """
+        name = element.get("name")
+        params_str = element.get("params") or ""
+        params = []
+        if params_str:
+            # Smart split that respects nesting in substitutions
+            current: list[str] = []
+            nesting = 0
+            for char in params_str:
+                if char in "({[":
+                    nesting += 1
+                elif char in ")}]":
+                    nesting -= 1
+
+                if char.isspace() and nesting == 0:
+                    if current:
+                        params.append("".join(current))
+                        current = []
+                else:
+                    current.append(char)
+            if current:
+                params.append("".join(current))
+        if name:
+            # Apply namespace prefix if active
+            if self._ns_stack:
+                name = f"{'.'.join(self._ns_stack)}.{name}"
+            self.macros[name] = (params, element)
+        return ET.Element("skip")
+
+    def _handle_conditional(self, element: ET.Element) -> ET.Element:
+        """Handle conditionals: <xacro:if value="..."/> or <xacro:unless value="..."/>.
+
+        Args:
+            element: The XACRO conditional XML element.
+
+        Returns:
+            A container with children if the condition matches, otherwise a 'skip' element.
+        """
+        tag = element.tag
+        # Check against normal and URI namespaces for the conditional tag
+        is_unless = "xacro:unless" in tag or "unless" in tag
+
+        condition = element.get("value") or "0"
+        is_true = self._eval_condition(condition)
+        if is_unless:
+            is_true = not is_true
+
+        if is_true:
+            container = ET.Element("container")
+            for child in element:
+                resolved_child = self.resolve_element(child)
+                if resolved_child.tag == "container":
+                    for sc in resolved_child:
+                        container.append(sc)
+                elif resolved_child.tag != "skip":
+                    container.append(resolved_child)
+            return container
+        return ET.Element("skip")
+
+    def _handle_insert_block(self, element: ET.Element) -> ET.Element:
+        """Handle block insertion: <xacro:insert_block name="..."/>.
+
+        Args:
+            element: The XACRO insert_block XML element.
+
+        Returns:
+            The resolved XML block if found, otherwise a 'skip' element.
+        """
+        name = str(self._substitute(element.get("name") or ""))
+        if name and name in self.properties:
+            # Cycle detection for blocks
+            if name in self._block_stack:
+                raise RobotXacroRecursionError(name)
+
+            self._block_stack.add(name)
+            try:
+                block = self.properties[name]
+                if isinstance(block, (ET.Element, list)):
+                    # It's an XML block
+                    # CRITICAL: We must deepcopy the block before insertion!
+                    container = ET.Element("container")
+
+                    def _process_block_item(item: ET.Element) -> None:
+                        res = self.resolve_element(copy.deepcopy(item))
+                        if res.tag == "container":
+                            for child in res:
+                                container.append(child)
+                        elif res.tag != "skip":
+                            container.append(res)
+
+                    if isinstance(block, ET.Element):
+                        # Single element
+                        _process_block_item(block)
+                    else:
+                        # List of elements
+                        for b_elem in block:
+                            _process_block_item(b_elem)
+
+                    return container
+            finally:
+                self._block_stack.remove(name)
+        return ET.Element("skip")
+
+    def _handle_macro_call(self, tag: str, element: ET.Element) -> ET.Element:
+        """Handle macro calls: <xacro:my_macro_name ...>.
+
+        Args:
+            tag: The original XML tag name.
+            element: The XACRO macro call XML element.
+
+        Returns:
+            A container containing the fully expanded macro body.
+
+        Raises:
+            RobotParserError: If parent scope inheritance fails.
+        """
+        macro_name = tag[6:]
+        if macro_name in self.macros:
+            params, macro_elem = self.macros[macro_name]
+            local_props: dict[str, Any] = {}
+
+            # Parse parameters
+            block_params = [p[1:] for p in params if p.startswith("*")]
+            regular_params = [p for p in params if not p.startswith("*")]
+
+            # Map children to block parameters
+            resolved_block_content: list[ET.Element] = []
+            for child in element:
+                res = self.resolve_element(copy.deepcopy(child))
+                if res.tag == "container":
+                    resolved_block_content.extend(res)
+                elif res.tag != "skip":
+                    resolved_block_content.append(res)
+
+            for bp in block_params:
+                local_props[bp] = resolved_block_content
+
+            # Map attributes to regular parameters
+            for p in regular_params:
+                bits = p.split(":=")
+                p_name = bits[0]
+                default_str = bits[1] if len(bits) > 1 else None
+
+                # Handle ^ parent-scope inheritance
+                if default_str is not None and default_str.startswith("^"):
+                    fallback_str = default_str[2:] if default_str.startswith("^|") else None
+                    if p_name in self.properties:
+                        default = self.properties[p_name]
+                    elif fallback_str is not None:
+                        # Fallback value should be substituted too
+                        default = self._try_parse_typed_value(self._substitute(fallback_str))
+                    else:
+                        raise RobotXacroExpressionError(
+                            p_name, "Outer-scope property not found for '^' inheritance"
+                        )
+                elif default_str is not None:
+                    default = self._try_parse_typed_value(self._substitute(default_str))
+                else:
+                    default = ""
+
+                raw_val = element.get(p_name)
+                val = self._substitute(raw_val) if raw_val is not None else default
+
+                local_props[p_name] = self._try_parse_typed_value(val)
+
+            # Expand macro body
+            parent_props = copy.deepcopy(self.properties)
+            self.properties.update(local_props)
+
+            container = ET.Element("container")
+            for child in macro_elem:
+                resolved_child = self.resolve_element(child)
+                if resolved_child.tag == "container":
+                    for sc in resolved_child:
+                        container.append(sc)
+                elif resolved_child.tag != "skip":
+                    container.append(resolved_child)
+
+            self.properties = parent_props
+            return container
+
+        # Unknown xacro tag - report warning and skip it
+        logger.warning(
+            f"XACRO: Unknown macro or tag: '{macro_name}'. Did you forget to include the corresponding file?"
+        )
+        return ET.Element("skip")
+
+    def _handle_regular_element(self, element: ET.Element) -> ET.Element:
+        """Handle substitutions in text and attributes for regular elements.
+
+        Args:
+            element: The XML element to process.
+
+        Returns:
+            A new XML element with all xacro expressions resolved.
+        """
         new_attrib = {}
         for key, val in element.attrib.items():
             # Attributes in XML must be strings
@@ -409,7 +700,7 @@ class XacroResolver:
         new_element.text = str(self._substitute(element.text or ""))
         new_element.tail = str(self._substitute(element.tail or ""))
 
-        # 9. Recursively process children
+        # Recursively process children
         for child in element:
             resolved_child = self.resolve_element(child)
             if resolved_child.tag == "container":
@@ -435,10 +726,14 @@ class XacroResolver:
             return False
         else:
             try:
-                # Basic string/bool comparison with math/data support
+                # Standard expression evaluation
+                if _DUNDER_PATTERN.search(condition_str):
+                    raise RobotXacroExpressionError(condition_str, "Forbidden dunder attributes")
                 ctx = {**self.eval_context, **self.properties, **self.args}
                 return bool(eval(condition_str, ctx, {}))
-            except Exception:
+            except Exception as e:
+                if isinstance(e, RobotParserError):
+                    raise
                 return condition_str not in ("", "0", "false")
 
     def _try_parse_typed_value(self, value: Any) -> Any:
@@ -452,14 +747,15 @@ class XacroResolver:
             return value
 
         # Try YAML (most robust and standard compliant)
-        try:
-            # safe_load handles ints, floats, bools (true/false), nulls, lists, dicts
-            parsed = yaml.safe_load(value)
-            # If it's a primitive type or collection, use it.
-            if isinstance(parsed, (int, float, bool, list, dict)) or parsed is None:
-                return parsed
-        except Exception:
-            pass
+        if yaml is not None:
+            try:
+                # safe_load handles ints, floats, bools (true/false), nulls, lists, dicts
+                parsed = yaml.safe_load(value)
+                # If it's a primitive type or collection, use it.
+                if isinstance(parsed, (int, float, bool, list, dict)) or parsed is None:
+                    return AttrDict._wrap(parsed)
+            except Exception:
+                pass
 
         # Fallback manual parsing (in case yaml fails or returns string for number)
         try:
@@ -474,21 +770,46 @@ class XacroResolver:
         return value
 
     def _substitute(self, text: str) -> Any:
-        """Handle ${prop}, $(arg name), and $(find pkg) substitutions with math."""
+        """Handle ${prop}, $(arg name), and $(find pkg) substitutions with math.
+
+        Args:
+            text: The input string containing xacro expressions.
+
+        Returns:
+            The resolved value, which may be a primitive type if the input was
+            a single ${} block.
+
+        Raises:
+            RobotParserError: If an undefined argument or environment variable is required.
+        """
         if not text:
             return ""
 
-        # 1. Handle arguments: $(arg name)
-        text = re.sub(r"\$\(arg (.*?)\)", lambda m: str(self.args.get(m.group(1), "")), text)
+        # Handle $$ escaping (e.g. $${expr} -> literal ${expr})
+        sentinel = "\x00LFDOLLAR\x00"
+        text = text.replace("$$", sentinel)
 
-        # 2. Handle environment variable substitution, matching roslaunch behaviour.
+        # 1. Handle arguments: $(arg name)
+        def _resolve_arg(m: re.Match[str]) -> str:
+            name = m.group(1).strip()
+            if name not in self.args:
+                raise RobotXacroExpressionError(name, "Undefined substitution argument")
+            return str(self.args[name])
+
+        text = re.sub(r"\$\(arg (.*?)\)", _resolve_arg, text)
+
+        # 2. Handle evaluation: $(eval expression) - Standard ROS XACRO feature
+        # We treat it as an alias for ${...} since our evaluation engine is Python-based.
+        text = re.sub(r"\$\(eval (.*?)\)", r"${\1}", text)
+
+        # 3. Handle environment variable substitution, matching roslaunch behaviour.
         # $(env VAR) raises if unset; $(optenv VAR) returns ""; $(optenv VAR default) returns default.
         def _resolve_env(m: re.Match[str]) -> str:
             parts = m.group(1).split(None, 1)
             var = parts[0]
             value = os.environ.get(var)
             if value is None:
-                raise RobotParserError(f"Required environment variable '{var}' is not set")
+                raise RobotXacroExpressionError(var, "Required environment variable not set")
             return value
 
         def _resolve_optenv(m: re.Match[str]) -> str:
@@ -508,7 +829,14 @@ class XacroResolver:
         # If the entire string is a single ${...} block, return the object directly.
         # This keeps dicts/lists as real objects for subsequent evaluations.
         stripped = text.strip()
-        if stripped.startswith("${") and stripped.count("${") == 1 and stripped.endswith("}"):
+        is_pure_expression = (
+            stripped.startswith("${")
+            and stripped.endswith("}")
+            and stripped.count("${") == 1
+            and sentinel not in stripped
+        )
+
+        if is_pure_expression:
             expr = stripped[2:-1]
             return self._evaluate(expr)
 
@@ -522,10 +850,26 @@ class XacroResolver:
         if "${" in text:
             text = re.sub(r"\${(.*?)}", replace_expr, text)
 
+        # Restore escaped dollar signs
+        text = text.replace(sentinel, "$")
+
         return text
 
     def _evaluate(self, expr: str) -> Any:
-        """Evaluate a single XACRO expression with hierarchical namespace support."""
+        """Evaluate a single XACRO expression with hierarchical namespace support.
+
+        Args:
+            expr: The python-like expression to evaluate.
+
+        Returns:
+            The result of the evaluation.
+
+        Raises:
+            RobotParserError: If the expression contains malicious dunder attributes.
+        """
+        if _DUNDER_PATTERN.search(expr):
+            raise RobotXacroExpressionError(expr, "Forbidden dunder attributes")
+
         try:
             # Build nested context for hierarchical namespaces (e.g. arm.mass)
             ctx = self.eval_context.copy()
@@ -547,10 +891,28 @@ class XacroResolver:
         except Exception as e:
             # CRITICAL: Do not silent-fail! If math fails (e.g. missing variable),
             # we must tell the user immediately rather than producing a corrupt URDF.
-            raise RobotParserError(f"Failed to evaluate expression '${{{expr}}}': {e}") from e
+            raise RobotXacroExpressionError(expr, str(e)) from e
+
+    def _handle_arg_eval(self, name: str) -> Any:
+        """Access XACRO arguments in evaluation context.
+
+        Args:
+            name: Name of the argument to retrieve.
+
+        Returns:
+            The argument value if found, otherwise an empty string.
+        """
+        return self.args.get(name, "")
 
     def _handle_load_yaml(self, filename: str) -> Any:
-        """Helper to load YAML file in XACRO context."""
+        """Helper to load YAML file in XACRO context.
+
+        Args:
+            filename: Path to the YAML file.
+
+        Returns:
+            The parsed YAML data (dict or list).
+        """
         if yaml is None:
             logger.error("XACRO: PyYAML is not installed. load_yaml() failed.")
             return {}
@@ -561,15 +923,22 @@ class XacroResolver:
             return {}
         try:
             with open(path) as f:
-                return yaml.safe_load(f)
+                data = yaml.safe_load(f)
+                return AttrDict._wrap(data)
         except Exception as e:  # pragma: no cover
             logger.error(f"XACRO: Failed to load YAML {filename}: {e}")
-            return {}
+            return AttrDict()
 
     def _handle_load_json(self, filename: str) -> Any:
-        """Helper to load JSON file in XACRO context."""
-        if json is None:
-            # This should theoretically not happen as json is stdlib
+        """Helper to load JSON file in XACRO context.
+
+        Args:
+            filename: Path to the JSON file.
+
+        Returns:
+            The parsed JSON data (dict or list).
+        """
+        if json is None:  # pragma: no cover
             return {}
 
         path = self._find_file(filename)
@@ -578,23 +947,34 @@ class XacroResolver:
             return {}
         try:
             with open(path) as f:
-                return json.load(f)
+                data = json.load(f)
+                return AttrDict._wrap(data)
         except Exception as e:  # pragma: no cover
             logger.error(f"XACRO: Failed to load JSON {filename}: {e}")
-            return {}
+            return AttrDict()
 
     def _finalize_urdf(self, root: ET.Element) -> str:
-        """Strip XACRO artifacts and format the final XML."""
+        """Strip XACRO artifacts and format the final XML.
 
-        # Recursive cleanup of namespaces and xacro tags
+        Args:
+            root: The root element of the resolved URDF.
+
+        Returns:
+            The serialized URDF string.
+        """
+
+        # Recursively strip XML namespaces and filter out XACRO-specific elements
         def cleanup(elem: ET.Element) -> None:
-            # Clean attributes
+            # Strip XACRO attributes and any with URI namespaces (e.g., {uri}name)
             for attr in list(elem.attrib.keys()):
-                # Standard URDF parsers often fail if they see xacro prefixes or URI namespaces
                 if "xacro" in attr or attr.startswith("{"):
                     del elem.attrib[attr]
-            # Recurse and filter children
-            # We must iterate over a copy of the list to allow modification during iteration
+
+            # Flatten tag by removing the {namespace} prefix for URDF parser compatibility
+            if isinstance(elem.tag, str) and elem.tag.startswith("{"):
+                elem.tag = elem.tag.split("}", 1)[1]
+
+            # Process children: filter out macros/properties and recurse into standard elements
             for child in list(elem):
                 tag = child.tag
 
@@ -604,10 +984,9 @@ class XacroResolver:
                     continue
 
                 # Aggressive filtering: Remove skip and any tag containing "xacro"
-                # This matches URDFParser's strict detection logic
-                is_xacro = (
-                    tag == "skip" or "xacro:" in tag or (tag.startswith("{") and "xacro" in tag)
-                )
+                # We strip the namespace first to avoid false positives from the URI itself
+                clean_tag = tag.split("}", 1)[1] if tag.startswith("{") else tag
+                is_xacro = clean_tag == "skip" or "xacro" in clean_tag
 
                 if is_xacro:
                     elem.remove(child)
@@ -620,7 +999,14 @@ class XacroResolver:
         return serialize_xml(root)
 
     def _find_file(self, filename: str) -> Path | None:
-        """Find file in search paths, supporting both relative paths and package:// URIs."""
+        """Find file in search paths, supporting both relative paths and package:// URIs.
+
+        Args:
+            filename: The filename or URI to search for.
+
+        Returns:
+            The absolute path to the file if found, otherwise None.
+        """
         # 1. Handle package:// URIs
         if filename.startswith("package:"):
             return resolve_package_path(filename, self.start_dir or Path.cwd())

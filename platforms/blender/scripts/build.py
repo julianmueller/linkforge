@@ -16,13 +16,14 @@ import re
 import shutil
 import subprocess
 import sys
+import typing
 from pathlib import Path
 
 # Use tomllib (Py3.11+) or fall back to string parsing for manifest metadata
 try:
     import tomllib
 except ImportError:
-    tomllib = None
+    tomllib = None  # type: ignore[assignment]
 
 # --- Configuration ---
 REPO_ROOT = Path(__file__).resolve().parents[3]  # platforms/blender/scripts/build.py -> root
@@ -34,7 +35,7 @@ WHEELS_DIR = PLATFORM_DIR / "wheels"
 DIST_DIR = REPO_ROOT / "dist"  # Keep dist in root for easy access
 
 # Packages to bundle as wheels for cross-platform/cross-version compatibility
-DEP_CONFIG = {
+DEP_CONFIG: dict[str, dict[str, typing.Any]] = {
     "PyYAML": {
         "version": "6.0.3",
         "universal": False,
@@ -44,7 +45,7 @@ DEP_CONFIG = {
             "macosx_10_13_x86_64",
             "manylinux2014_x86_64",
         ],
-        "py_versions": ["311"],  # Blender 4.2+
+        "py_versions": ["311", "312", "313"],  # Blender 4.2, 5.0, 5.1+
     }
 }
 
@@ -61,7 +62,7 @@ def read_manifest_value(key: str) -> str:
     return "0.0.0"
 
 
-def sync_dependencies():
+def sync_dependencies() -> None:
     """Download required wheels and update the manifest."""
     print("🔄 Syncing dependencies...")
 
@@ -85,8 +86,10 @@ def sync_dependencies():
             # Download pure-python universal wheel
             subprocess.run(
                 [
-                    sys.executable,
-                    "-m",
+                    "uv",
+                    "run",
+                    "--with",
+                    "pip",
                     "pip",
                     "download",
                     req,
@@ -102,8 +105,10 @@ def sync_dependencies():
                 for py_ver in config["py_versions"]:
                     subprocess.run(
                         [
-                            sys.executable,
-                            "-m",
+                            "uv",
+                            "run",
+                            "--with",
+                            "pip",
                             "pip",
                             "download",
                             req,
@@ -122,7 +127,7 @@ def sync_dependencies():
     update_manifest_wheels()
 
 
-def update_manifest_wheels():
+def update_manifest_wheels() -> None:
     """Scan wheels/ directory and update blender_manifest.toml."""
     if not MANIFEST_PATH.exists():
         print(f"❌ Error: {MANIFEST_PATH} not found")
@@ -186,6 +191,8 @@ def build_extension() -> Path:
         sys.exit(1)
 
     shutil.copytree(CORE_DIR, staging_dir / "linkforge_core")
+    if (REPO_ROOT / "core" / "LICENSE").exists():
+        shutil.copy2(REPO_ROOT / "core" / "LICENSE", staging_dir / "linkforge_core")
     print(f"  Bundled linkforge_core -> {staging_dir / 'linkforge_core'}")
 
     # 3. Copy dependencies (if any)
@@ -249,7 +256,7 @@ def build_extension() -> Path:
     return DIST_DIR
 
 
-def clean():
+def clean() -> None:
     """Clean build artifacts."""
     if DIST_DIR.exists():
         shutil.rmtree(DIST_DIR)

@@ -12,9 +12,9 @@ from linkforge.blender.adapters.core_to_blender import (
     import_mesh_file,
     import_robot_to_scene,
     normalize_and_consolidate_imported_objects,
-    resolve_mesh_path,
 )
-from linkforge.linkforge_core.models import (
+from linkforge_core.base import FileSystemResolver
+from linkforge_core.models import (
     Box,
     CameraInfo,
     Collision,
@@ -40,7 +40,7 @@ from linkforge.linkforge_core.models import (
     Vector3,
     Visual,
 )
-from linkforge.linkforge_core.models.sensor import GPSInfo, IMUInfo
+from linkforge_core.models.sensor import GPSInfo, IMUInfo
 from mathutils import Vector
 
 
@@ -59,42 +59,49 @@ def clean_scene():
     return bpy.context.scene
 
 
-def test_resolve_mesh_path(tmp_path):
+def test_resolve_mesh_path(tmp_path) -> None:
     """Test resolution of various mesh path types."""
     urdf_dir = tmp_path / "urdf"
     urdf_dir.mkdir()
+    resolver = FileSystemResolver()
 
     # 1. Local relative path (exists)
     mesh_file = urdf_dir / "mesh.stl"
     mesh_file.touch()
-    assert resolve_mesh_path(Path("mesh.stl"), urdf_dir) == mesh_file
+    assert resolver.resolve("mesh.stl", relative_to=urdf_dir) == mesh_file.absolute()
 
     # 2. Package URI (requires mock of resolve_package_path)
-    with patch("linkforge.blender.adapters.core_to_blender.resolve_package_path") as mock_resolve:
+    with patch("linkforge_core.utils.path_utils.resolve_package_path") as mock_resolve:
         mock_resolve.return_value = mesh_file
-        assert resolve_mesh_path(Path("package://my_pkg/mesh.stl"), urdf_dir) == mesh_file
+        # Note: resolve_package_path mock needs to return a Path that exists
+        assert (
+            resolver.resolve("package://my_pkg/mesh.stl", relative_to=urdf_dir)
+            == mesh_file.absolute()
+        )
 
-    # 3. Non-existent path falls back to absolute conversion
-    abs_path = Path("/tmp/non_existent.obj")
-    assert resolve_mesh_path(abs_path, urdf_dir) == abs_path
+    # 3. Non-existent path raises FileNotFoundError (new behavior)
+    with pytest.raises(FileNotFoundError):
+        resolver.resolve("/tmp/non_existent.obj", relative_to=urdf_dir)
 
     # 4. file:// URI
-    file_uri = Path("file:///tmp/mesh.stl")
-    assert resolve_mesh_path(file_uri, urdf_dir) == Path("/tmp/mesh.stl")
+    file_uri = "file:///tmp/mesh.stl"
+    # Create the file so it can be resolved (FileSystemResolver checks existence)
+    mesh_tmp = Path("/tmp/mesh.stl")
+    mesh_tmp.touch()
+    assert resolver.resolve(file_uri, relative_to=urdf_dir) == mesh_tmp.absolute()
 
-    # 5. Windows style with leading slash (Hit line 54)
-    win_path = "file:///C:/path/to/mesh.stl"
-    res = resolve_mesh_path(Path(win_path), urdf_dir)
-    assert str(res).startswith("C:")
+    # 5. Windows style URI (mocking Windows environment is hard, but we can test the regex)
+    # FileSystemResolver uses re.sub and Path.
+    # On Unix, file:///C:/path becomes /C:/path
+    win_uri = "file:///C:/path/to/mesh.stl"
+    with patch("pathlib.Path.exists", return_value=True):
+        res = resolver.resolve(win_uri, relative_to=urdf_dir)
+        # Our logic for Windows URIs strips the leading slash if : is present
+        # On Posix, Path("C:/...").absolute() will prepend CWD, so we check for presence
+        assert "C:/path/to/mesh.stl" in str(res).replace("\\", "/")
 
-    # 6. Package resolution failure warning (Hit line 62)
-    with patch(
-        "linkforge.blender.adapters.core_to_blender.resolve_package_path", return_value=None
-    ):
-        resolve_mesh_path(Path("package://missing/mesh.stl"), urdf_dir)
 
-
-def test_create_material_from_color(clean_scene):
+def test_create_material_from_color(clean_scene) -> None:
     """Test material creation from color model."""
     color = Color(1.0, 0.5, 0.0, 1.0)
     mat = create_material_from_color(color, "TestMaterial")
@@ -114,7 +121,7 @@ def test_create_material_from_color(clean_scene):
     assert mat_reuse == mat
 
 
-def test_create_primitive_mesh(clean_scene):
+def test_create_primitive_mesh(clean_scene) -> None:
     """Test creation of primitive meshes (Box, Cylinder, Sphere)."""
     # 1. Box
     box = Box(size=Vector3(2.0, 2.0, 2.0))
@@ -141,7 +148,7 @@ def test_create_primitive_mesh(clean_scene):
     assert create_primitive_mesh(None, "Fail") is None
 
 
-def test_normalize_and_consolidate(clean_scene):
+def test_normalize_and_consolidate(clean_scene) -> None:
     """Test joining multiple objects and normalization."""
     # Add temporary meshes
     bpy.ops.mesh.primitive_cube_add(location=(1, 1, 1))
@@ -165,7 +172,7 @@ def test_normalize_and_consolidate(clean_scene):
     assert len(bpy.data.objects) == 1
 
 
-def test_import_mesh_file_success(clean_scene, tmp_path):
+def test_import_mesh_file_success(clean_scene, tmp_path) -> None:
     """Test successful mesh import flow with a real minimal file."""
     p = tmp_path / "test.obj"
     p.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
@@ -185,7 +192,7 @@ def test_import_mesh_file_success(clean_scene, tmp_path):
         assert "ConsolidatedCube" in res.name
 
 
-def test_create_joint_object(clean_scene):
+def test_create_joint_object(clean_scene) -> None:
     """Test reconstruction of a Joint and its parenting."""
     parent_link = bpy.data.objects.new("ParentLink", None)
     child_link = bpy.data.objects.new("ChildLink", None)
@@ -214,7 +221,7 @@ def test_create_joint_object(clean_scene):
     assert obj.linkforge_joint.axis == "Z"
 
 
-def test_create_sensor_object(clean_scene):
+def test_create_sensor_object(clean_scene) -> None:
     """Test reconstruction of a Sensor."""
     link_obj = bpy.data.objects.new("LinkA", None)
     clean_scene.collection.objects.link(link_obj)
@@ -237,10 +244,10 @@ def test_create_sensor_object(clean_scene):
     assert obj.linkforge_sensor.sensor_type == "CAMERA"
 
 
-def test_import_robot_with_mimic_and_gazebo(clean_scene):
+def test_import_robot_with_mimic_and_gazebo(clean_scene) -> None:
     """Test import of robot with mimic joints and gazebo plugins."""
-    from linkforge.linkforge_core.models.gazebo import GazeboElement, GazeboPlugin
-    from linkforge.linkforge_core.models.joint import JointMimic
+    from linkforge_core.models.gazebo import GazeboElement, GazeboPlugin
+    from linkforge_core.models.joint import JointMimic
 
     robot = Robot(
         name="MimicBot",
@@ -262,14 +269,15 @@ def test_import_robot_with_mimic_and_gazebo(clean_scene):
                 mimic=JointMimic(joint="j1", multiplier=2.0, offset=0.1),
             ),
         ),
-        gazebo_elements=[
+        initial_gazebo_elements=[
             GazeboElement(
                 plugins=[GazeboPlugin(name="p3d_ros2_control", filename="libgazebo_ros_p3d.so")]
             )
         ],
     )
 
-    with patch("linkforge.blender.adapters.core_to_blender.resolve_mesh_path"):
+    with patch("linkforge_core.models.robot.Robot.resolve_resource") as mock_resolve:
+        mock_resolve.return_value = Path("dummy.stl")
         import_robot_to_scene(robot, Path("robot.urdf"), bpy.context)
 
     assert "j2" in bpy.data.objects
@@ -281,7 +289,7 @@ def test_import_robot_with_mimic_and_gazebo(clean_scene):
     assert clean_scene.linkforge.gazebo_plugin_name == "p3d_ros2_control"
 
 
-def test_create_material_no_tree(clean_scene):
+def test_create_material_no_tree(clean_scene) -> None:
     """Test material creation when node tree is missing."""
     col = Color(1, 0, 0, 1)
     # Use a real material but force use_nodes=False
@@ -294,9 +302,9 @@ def test_create_material_no_tree(clean_scene):
     assert res.name.startswith("NoTree_Test")
 
 
-def test_import_robot_with_transmissions(clean_scene):
+def test_import_robot_with_transmissions(clean_scene) -> None:
     """Test importing robot with transmissions."""
-    from linkforge.linkforge_core.models.transmission import (
+    from linkforge_core.models.transmission import (
         Transmission,
         TransmissionActuator,
         TransmissionJoint,
@@ -304,9 +312,9 @@ def test_import_robot_with_transmissions(clean_scene):
 
     robot = Robot(
         name="TransBot",
-        initial_links=(Link(name="b"),),
+        initial_links=(Link(name="world"), Link(name="b")),
         initial_joints=(Joint(name="j1", parent="world", child="b", type=JointType.FIXED),),
-        transmissions=[
+        initial_transmissions=[
             Transmission(
                 name="t1",
                 type="simple",
@@ -319,9 +327,9 @@ def test_import_robot_with_transmissions(clean_scene):
     assert clean_scene.linkforge.robot_name == "TransBot"
 
 
-def test_full_robot_import_integration(clean_scene):
+def test_full_robot_import_integration(clean_scene) -> None:
     """A 'MegaBot' test to hit as many code paths as possible in core_to_blender."""
-    from linkforge.linkforge_core.models.transmission import (
+    from linkforge_core.models.transmission import (
         Transmission,
         TransmissionActuator,
         TransmissionJoint,
@@ -335,13 +343,13 @@ def test_full_robot_import_integration(clean_scene):
     # Base link with inertial properties and collision
     l1 = Link(
         name="base_link",
-        visuals=[
+        initial_visuals=[
             Visual(
                 geometry=Box(size=Vector3(1, 1, 1)),
                 material=Material(name="Blue", color=Color(0, 0, 1, 1)),
             )
         ],
-        collisions=[Collision(name="base_col", geometry=Box(size=Vector3(1, 1, 1)))],
+        initial_collisions=[Collision(name="base_col", geometry=Box(size=Vector3(1, 1, 1)))],
         inertial=Inertial(
             mass=1.0, inertia=InertiaTensor(ixx=0.1, iyy=0.1, izz=0.1, ixy=0.0, ixz=0.0, iyz=0.0)
         ),
@@ -350,18 +358,18 @@ def test_full_robot_import_integration(clean_scene):
     # Tool link with multiple visuals and sphere collision
     l2 = Link(
         name="tool_link",
-        visuals=[
+        initial_visuals=[
             Visual(geometry=Cylinder(radius=0.1, length=0.5)),
             Visual(geometry=Sphere(radius=0.2), origin=Transform(xyz=Vector3(0, 0, 0.5))),
         ],
-        collisions=[Collision(geometry=Sphere(radius=0.2))],
+        initial_collisions=[Collision(geometry=Sphere(radius=0.2))],
     )
 
     # Mesh geometry in 3rd link with mesh collision
     l3 = Link(
         name="mesh_link",
-        visuals=[Visual(geometry=Mesh(filepath=Path("package://pkg/mesh.stl")))],
-        collisions=[Collision(geometry=Mesh(filepath=Path("package://pkg/mesh.stl")))],
+        initial_visuals=[Visual(geometry=Mesh(resource="package://pkg/mesh.stl"))],
+        initial_collisions=[Collision(geometry=Mesh(resource="package://pkg/mesh.stl"))],
     )
     # Sensors
     Sensor(
@@ -388,7 +396,7 @@ def test_full_robot_import_integration(clean_scene):
 
     # Mesh geometry in 3rd link
     l3 = Link(
-        name="mesh_link", visuals=[Visual(geometry=Mesh(filepath=Path("package://pkg/mesh.stl")))]
+        name="mesh_link", initial_visuals=[Visual(geometry=Mesh(resource="package://pkg/mesh.stl"))]
     )
     j2 = Joint(name="j2", type=JointType.FIXED, parent="base_link", child="mesh_link")
 
@@ -404,7 +412,7 @@ def test_full_robot_import_integration(clean_scene):
         ),
     )
 
-    from linkforge.linkforge_core.models.sensor import LidarInfo
+    from linkforge_core.models.sensor import LidarInfo
 
     lidar = Sensor(
         name="lidar_sensor",
@@ -438,16 +446,16 @@ def test_full_robot_import_integration(clean_scene):
         name="MegaBot",
         initial_links=[l1, l2, l3],
         initial_joints=[j1, j2],
-        sensors=[cam_detailed, imu, gps, lidar],
-        ros2_controls=[rc],
-        gazebo_elements=[gz],
-        transmissions=[tr],
+        initial_sensors=[cam_detailed, imu, gps, lidar],
+        initial_ros2_controls=[rc],
+        initial_gazebo_elements=[gz],
+        initial_transmissions=[tr],
     )
 
     # Mocking OBJ for mesh import
     with (
         patch("linkforge.blender.adapters.core_to_blender.import_mesh_file") as mock_io,
-        patch("linkforge.blender.adapters.core_to_blender.resolve_package_path") as mock_pkg,
+        patch("linkforge_core.utils.path_utils.resolve_package_path") as mock_pkg,
     ):
         mock_io.return_value = bpy.data.objects.new("MeshObj", None)
         mock_pkg.return_value = Path("/tmp/mesh.stl")
@@ -474,11 +482,11 @@ def test_full_robot_import_integration(clean_scene):
     print(f"DEBUG: Objects in scene: {[o.name for o in bpy.data.objects]}")
 
 
-def test_import_mesh_file_robustness(tmp_path):
-    """Hit lines 216, 224, 254, 261 in core_to_blender.py."""
+def test_import_mesh_file_robustness(tmp_path) -> None:
+    """Hit edge cases."""
     from unittest import mock
 
-    # Line 216 (DAE on Blender 5.0+ mock)
+    # (DAE on Blender 5.0+ mock)
     dae = tmp_path / "test.dae"
     dae.touch()
 
@@ -489,18 +497,18 @@ def test_import_mesh_file_robustness(tmp_path):
         mock_bpy.app.version = (5, 0, 0)
         assert import_mesh_file(dae, "test") is None
 
-    # Line 224 (Unsupported extension)
+    # (Unsupported extension)
     txt = tmp_path / "test.txt"
     txt.touch()
     assert import_mesh_file(txt, "test") is None
 
-    # Line 254 (No functional importer)
+    # (No functional importer)
     obj_file = tmp_path / "test.obj"
     obj_file.touch()
     with mock.patch("bpy.ops.wm.obj_import", side_effect=RuntimeError("Fail")):
         assert import_mesh_file(obj_file, "test") is None
 
-    # Line 261 (Importer ran but no objects)
+    # (Importer ran but no objects)
     with (
         mock.patch("bpy.ops.wm.obj_import", return_value={"FINISHED"}),
         mock.patch("linkforge.blender.adapters.core_to_blender.bpy") as mock_bpy_at_use,
@@ -511,8 +519,8 @@ def test_import_mesh_file_robustness(tmp_path):
         assert import_mesh_file(obj_file, "test") is None
 
 
-def test_get_geometry_type_str_robustness():
-    """Hit line 403 in core_to_blender.py (Unknown type fallback and Cylinder)."""
+def test_get_geometry_type_str_robustness() -> None:
+    """Hit edge case (Unknown type fallback and Cylinder)."""
     from unittest import mock
 
     cyl = Cylinder(radius=1.0, length=2.0)

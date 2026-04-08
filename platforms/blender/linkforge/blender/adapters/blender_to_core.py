@@ -26,9 +26,9 @@ else:
 
 from dataclasses import dataclass
 
-from ...linkforge_core.exceptions import RobotModelError
-from ...linkforge_core.logging_config import get_logger
-from ...linkforge_core.models import (
+from linkforge_core.exceptions import RobotValidationError, ValidationErrorCode
+from linkforge_core.logging_config import get_logger
+from linkforge_core.models import (
     Box,
     CameraInfo,
     Collision,
@@ -64,15 +64,17 @@ from ...linkforge_core.models import (
     Vector3,
     Visual,
 )
-from ...linkforge_core.models.transmission import (
+from linkforge_core.models.transmission import (
     Transmission,
     TransmissionActuator,
     TransmissionJoint,
     TransmissionType,
 )
-from ...linkforge_core.physics import calculate_inertia, calculate_mesh_inertia_from_triangles
-from ...linkforge_core.utils.math_utils import clean_float, normalize_vector
-from ...linkforge_core.utils.string_utils import sanitize_name
+from linkforge_core.physics import calculate_inertia, calculate_mesh_inertia_from_triangles
+from linkforge_core.utils.math_utils import clean_float, normalize_vector
+from linkforge_core.utils.string_utils import sanitize_name
+
+from linkforge.blender.utils.physics import calculate_mesh_inertia_numpy
 
 # Constants
 logger = get_logger(__name__)
@@ -179,6 +181,8 @@ def detect_primitive_type(obj: bpy.types.Object | None) -> str | None:
             geom_type = str(obj[tag])
             if geom_type in ("BOX", "CYLINDER", "SPHERE"):
                 return geom_type
+            if geom_type == "MESH":
+                return None
 
     # Count vertices and faces
     vert_count = len(mesh.vertices)
@@ -298,7 +302,9 @@ def get_object_geometry(
 
             if mesh_path:
                 # Return Mesh geometry with file path
-                return Mesh(filepath=mesh_path, scale=Vector3(1.0, 1.0, 1.0)), geom_world_matrix
+                return Mesh(
+                    resource=str(mesh_path), scale=Vector3(1.0, 1.0, 1.0)
+                ), geom_world_matrix
 
         # Fallback: approximate with bounding box if export failed or not requested
         actual_geometry_type = "BOX"
@@ -334,17 +340,19 @@ def get_object_geometry(
 def extract_mesh_triangles(
     obj: Any,
     depsgraph: Any | None = None,
-) -> tuple[list[tuple[float, float, float]], list[tuple[int, int, int]]] | None:
+    as_numpy: bool = False,
+) -> tuple[Any, Any] | None:
     """Extract triangle mesh data from Blender object.
 
     Args:
         obj: Blender mesh object
+        depsgraph: Optional evaluated dependency graph
+        as_numpy: If True, return NumPy arrays instead of Python lists
 
     Returns:
-        Tuple of (vertices, triangles) or None if not a mesh
-        vertices: List of (x, y, z) coordinates
-        triangles: List of (v0, v1, v2) triangle vertex indices
-
+        Tuple of (vertices, triangles) or None if not a mesh:
+            - vertices: List of (x, y, z) coordinates or (N, 3) NumPy array
+            - triangles: List of (v0, v1, v2) vertex indices or (M, 3) NumPy array
     """
     if obj is None or obj.type != "MESH":
         return None
@@ -366,30 +374,37 @@ def extract_mesh_triangles(
     # The inertia tensor is always computed relative to the object's center of mass
     scale_matrix = obj.matrix_world.to_scale()
 
-    # NumPy-accelerated extraction for O(N) mesh processing (avoids Python loop overhead)
+    # Fast O(N) extraction via NumPy
     if np is not None:
         # Fast vertex extraction via foreach_get
         num_verts = len(mesh.vertices)
         verts = np.empty(num_verts * 3, dtype=np.float32)
         mesh.vertices.foreach_get("co", verts)
         vertices_array = verts.reshape((-1, 3))
+
+        # Fast face index extraction (triangles)
+        num_tris = len(mesh.loop_triangles)
+        tris = np.empty(num_tris * 3, dtype=np.int32)
+        mesh.loop_triangles.foreach_get("vertices", tris)
+        triangles_array = tris.reshape((-1, 3))
+
         # Apply scale
         vertices_array[:, 0] *= scale_matrix.x
         vertices_array[:, 1] *= scale_matrix.y
         vertices_array[:, 2] *= scale_matrix.z
+
+        # Optional: Return arrays directly
+        if as_numpy:
+            eval_obj.to_mesh_clear()
+            return vertices_array, triangles_array
+
         vertices_list = vertices_array.tolist()
+        triangles_list = triangles_array.tolist()
 
-        # Fast triangle extraction via loop_triangles
-        num_tris = len(mesh.loop_triangles)
-        tris = np.empty(num_tris * 3, dtype=np.int32)
-        mesh.loop_triangles.foreach_get("vertices", tris)
-        triangles_list = tris.reshape((-1, 3)).tolist()
-
-        # Cleanup memory
         eval_obj.to_mesh_clear()
         return vertices_list, triangles_list
 
-    # Pure Python Fallback (if NumPy is missing)
+    # Python fallback
     vertices = [
         (v.co.x * scale_matrix.x, v.co.y * scale_matrix.y, v.co.z * scale_matrix.z)
         for v in mesh.vertices
@@ -589,8 +604,8 @@ def blender_link_to_core_with_origin(
     inertial = None
     if props.mass > 0:
         if props.use_auto_inertia:
-            # Auto-calculate inertia from geometry
-            # Prefer collision geometry, fallback to visual if no collision exists
+            # Automated inertia calculation from geometry
+            # Priority order: Collision then Visual
             geom_obj = None
             geom = None
 
@@ -612,12 +627,24 @@ def blender_link_to_core_with_origin(
             if geom and geom_obj:
                 # Calculate inertia based on geometry type
                 if isinstance(geom, Mesh) and geom_obj.type == "MESH":
-                    mesh_data = extract_mesh_triangles(geom_obj, depsgraph=depsgraph)
+                    # Optimized NumPy implementation
+                    use_numpy = np is not None
+                    mesh_data = extract_mesh_triangles(
+                        geom_obj, depsgraph=depsgraph, as_numpy=use_numpy
+                    )
+
                     if mesh_data:
                         vertices, triangles = mesh_data
-                        inertia_tensor = calculate_mesh_inertia_from_triangles(
-                            vertices, triangles, props.mass
-                        )
+                        if use_numpy:
+                            # Vectorized implementation
+                            inertia_tensor = calculate_mesh_inertia_numpy(
+                                vertices, triangles, props.mass
+                            )
+                        else:
+                            # Fallback to pure-Python core implementation
+                            inertia_tensor = calculate_mesh_inertia_from_triangles(
+                                vertices, triangles, props.mass
+                            )
                     else:
                         # Fallback to bounding box if mesh extraction fails
                         dimensions = geom_obj.dimensions
@@ -647,6 +674,11 @@ def blender_link_to_core_with_origin(
                 izz=props.inertia_izz,
             )
 
+        # Final safety check for type-checker (ensure not None)
+        final_inertia: InertiaTensor = (
+            inertia_tensor if inertia_tensor is not None else InertiaTensor.zero()
+        )
+
         # Inertial properties (mass and inertia tensor)
         # Use stored inertia origin from link properties
         inertial_origin = Transform(
@@ -661,17 +693,18 @@ def blender_link_to_core_with_origin(
                 clean_float(props.inertia_origin_rpy[2]),
             ),
         )
-        inertial = Inertial(mass=props.mass, origin=inertial_origin, inertia=inertia_tensor)
+        inertial = Inertial(mass=props.mass, origin=inertial_origin, inertia=final_inertia)
 
-    return Link(name=link_name, visuals=visuals, collisions=collisions, inertial=inertial)
+    return Link(
+        name=link_name, initial_visuals=visuals, initial_collisions=collisions, inertial=inertial
+    )
 
 
-def blender_joint_to_core(obj: Any, scene: Any) -> Joint | None:
+def blender_joint_to_core(obj: Any) -> Joint | None:
     """Convert Blender Empty with JointPropertyGroup to Core Joint.
 
     Args:
         obj: Blender Empty object with linkforge_joint property group
-        scene: Blender scene to find parent link object
 
     Returns:
         Core Joint model or None
@@ -767,16 +800,38 @@ def blender_joint_to_core(obj: Any, scene: Any) -> Joint | None:
     parent_obj = props.parent_link
     child_obj = props.child_link
 
-    parent = parent_obj.linkforge.link_name if parent_obj else ""
-    child = child_obj.linkforge.link_name if child_obj else ""
+    parent = (
+        (
+            parent_obj.linkforge.link_name
+            if parent_obj and parent_obj.linkforge.link_name
+            else parent_obj.name
+        )
+        if parent_obj
+        else ""
+    )
+    child = (
+        (
+            child_obj.linkforge.link_name
+            if child_obj and child_obj.linkforge.link_name
+            else child_obj.name
+        )
+        if child_obj
+        else ""
+    )
 
     if not parent:
-        raise RobotModelError(
-            f"Joint '{joint_name}' has no parent link. Please select a Parent Link."
+        raise RobotValidationError(
+            ValidationErrorCode.NOT_FOUND,
+            "Joint has no parent link. Please select a Parent Link.",
+            target="ParentLink",
+            value=joint_name,
         )
     if not child:
-        raise RobotModelError(
-            f"Joint '{joint_name}' has no child link. Please select a Child Link."
+        raise RobotValidationError(
+            ValidationErrorCode.NOT_FOUND,
+            "Joint has no child link. Please select a Child Link.",
+            target="ChildLink",
+            value=joint_name,
         )
 
     return Joint(
@@ -874,10 +929,14 @@ def blender_transmission_to_core(obj: Any) -> Transmission | None:
         j2_obj = props.joint2_name
         if j1_obj and j2_obj:
             j1_name = (
-                j1_obj.linkforge_joint.joint_name if hasattr(j1_obj, "linkforge_joint") else ""
+                j1_obj.linkforge_joint.joint_name
+                if hasattr(j1_obj, "linkforge_joint") and j1_obj.linkforge_joint.joint_name
+                else ""
             ) or j1_obj.name
             j2_name = (
-                j2_obj.linkforge_joint.joint_name if hasattr(j2_obj, "linkforge_joint") else ""
+                j2_obj.linkforge_joint.joint_name
+                if hasattr(j2_obj, "linkforge_joint") and j2_obj.linkforge_joint.joint_name
+                else ""
             ) or j2_obj.name
 
             joints.append(
@@ -1069,15 +1128,15 @@ def scene_to_robot(
     depsgraph = context.evaluated_depsgraph_get()
     conversion_errors: list[str] = []
 
-    # Step 1: Categorize scene objects
+    # Categorize scene objects
     link_objects, joint_objects, sensor_objects, transmission_objects, joints_map, root_link = (
         _categorize_scene_objects(scene)
     )
 
-    # Step 2: Calculate link coordinate frames
+    # Calculate link coordinate frames
     link_frames = _calculate_link_frames(link_objects, joints_map, root_link)
 
-    # Step 3: Process Links
+    # Process Links
     for _link_name, obj in link_objects.items():
         try:
             # Create link
@@ -1094,7 +1153,7 @@ def scene_to_robot(
     # Process Joints
     for obj in joint_objects:
         try:
-            joint = blender_joint_to_core(obj, scene)
+            joint = blender_joint_to_core(obj)
             if joint:
                 # Calculate joint origin relative to parent link frame
                 # IMPORTANT: Joint origin should represent where the CHILD LINK's frame is,
@@ -1177,7 +1236,7 @@ def scene_to_robot(
                         parameters=params,
                     )
                     # Note: We wrap the plugin in a GazeboElement without a reference (global)
-                    from ...linkforge_core.models.gazebo import GazeboElement
+                    from linkforge_core.models.gazebo import GazeboElement
 
                     robot.add_gazebo_element(GazeboElement(plugins=[gazebo_plugin]))
         except Exception as e:
@@ -1189,9 +1248,11 @@ def scene_to_robot(
     if conversion_errors:
         error_summary = "\n".join(f"  - {err}" for err in conversion_errors)
         # In non-strict mode, always raise with all collected errors
-        raise RobotModelError(
-            f"Unable to build robot model. The following configuration errors were found:\n"
-            f"{error_summary}"
+        raise RobotValidationError(
+            ValidationErrorCode.INVALID_VALUE,
+            f"Multiple configuration errors found:\n{error_summary}",
+            target="RobotConversion",
+            value=robot_name,
         )
 
     return robot, conversion_errors
@@ -1221,11 +1282,22 @@ def blender_sensor_to_core(obj: Any) -> Sensor | None:
     sensor_name = props.sensor_name if props.sensor_name else obj.name
     sensor_type = SensorType(props.sensor_type.lower())
     link_obj = props.attached_link
-    link_name = link_obj.linkforge.link_name if link_obj else ""
+    link_name = (
+        (
+            link_obj.linkforge.link_name
+            if link_obj and link_obj.linkforge.link_name
+            else link_obj.name
+        )
+        if link_obj
+        else ""
+    )
 
     if not link_name:
-        raise RobotModelError(
-            f"Sensor '{sensor_name}' is not attached to any link. Please select a parent link in the Sensor settings."
+        raise RobotValidationError(
+            ValidationErrorCode.NOT_FOUND,
+            "Sensor is not attached to any link. Please select a parent link.",
+            target="SensorAttachment",
+            value=sensor_name,
         )
 
     # Build sensor origin from object transform

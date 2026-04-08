@@ -26,7 +26,7 @@ from linkforge_core.parsers.urdf_parser import URDFParser
 class TestTransmissionRoundtrip:
     """Test round-trip for transmission elements."""
 
-    def test_simple_transmission_roundtrip(self):
+    def test_simple_transmission_roundtrip(self) -> None:
         """Test that simple transmission survives round-trip."""
         # Create robot with transmission
         robot = Robot(name="test_robot")
@@ -50,7 +50,7 @@ class TestTransmissionRoundtrip:
             mechanical_reduction=50.0,
             hardware_interface="effort",
         )
-        robot.transmissions.append(trans)
+        robot.add_transmission(trans)
 
         # Generate URDF
         generator = URDFGenerator()
@@ -68,7 +68,7 @@ class TestTransmissionRoundtrip:
         assert parsed_trans.joints[0].mechanical_reduction == 50.0
         assert "effort" in parsed_trans.joints[0].hardware_interfaces
 
-    def test_differential_transmission_roundtrip(self):
+    def test_differential_transmission_roundtrip(self) -> None:
         """Test that differential transmission survives round-trip."""
         # Create robot with differential transmission
         robot = Robot(name="diff_robot")
@@ -104,7 +104,7 @@ class TestTransmissionRoundtrip:
             joint2_name="joint2",
             mechanical_reduction=100.0,
         )
-        robot.transmissions.append(trans)
+        robot.add_transmission(trans)
 
         # Round-trip
         generator = URDFGenerator()
@@ -122,7 +122,7 @@ class TestTransmissionRoundtrip:
 class TestGazeboRoundtrip:
     """Test round-trip for Gazebo elements."""
 
-    def test_robot_level_gazebo_roundtrip(self):
+    def test_robot_level_gazebo_roundtrip(self) -> None:
         """Test that robot-level Gazebo element survives round-trip."""
         robot = Robot(name="test_robot")
         robot.add_link(Link(name="base_link"))
@@ -134,7 +134,7 @@ class TestGazeboRoundtrip:
             parameters={"update_rate": "50"},
         )
         element = GazeboElement(reference=None, static=True, plugins=[plugin])
-        robot.gazebo_elements.append(element)
+        robot.add_gazebo_element(element)
 
         # Round-trip
         generator = URDFGenerator()
@@ -149,7 +149,7 @@ class TestGazeboRoundtrip:
         assert len(parsed_elem.plugins) == 1
         assert parsed_elem.plugins[0].name == "joint_state_publisher"
 
-    def test_link_level_gazebo_roundtrip(self):
+    def test_link_level_gazebo_roundtrip(self) -> None:
         """Test that link-level Gazebo element survives round-trip."""
         robot = Robot(name="test_robot")
         robot.add_link(Link(name="base_link"))
@@ -163,7 +163,7 @@ class TestGazeboRoundtrip:
             kp=1000.0,
             kd=100.0,
         )
-        robot.gazebo_elements.append(element)
+        robot.add_gazebo_element(element)
 
         # Round-trip
         generator = URDFGenerator()
@@ -180,7 +180,7 @@ class TestGazeboRoundtrip:
         assert parsed_elem.kp == pytest.approx(1000.0)
         assert parsed_elem.kd == pytest.approx(100.0)
 
-    def test_joint_level_gazebo_roundtrip(self):
+    def test_joint_level_gazebo_roundtrip(self) -> None:
         """Test that joint-level Gazebo element survives round-trip."""
         robot = Robot(name="test_robot")
         robot.add_link(Link(name="link1"))
@@ -202,7 +202,7 @@ class TestGazeboRoundtrip:
             provide_feedback=True,
             implicit_spring_damper=True,
         )
-        robot.gazebo_elements.append(element)
+        robot.add_gazebo_element(element)
 
         # Round-trip
         generator = URDFGenerator()
@@ -220,7 +220,7 @@ class TestGazeboRoundtrip:
 class TestComplexRobotRoundtrip:
     """Test round-trip for complex robot with multiple advanced elements."""
 
-    def test_complete_robot_with_all_elements(self):
+    def test_complete_robot_with_all_elements(self) -> None:
         """Test robot with sensors, transmissions, and Gazebo elements."""
         # Create a mobile robot with camera and IMU
         robot = Robot(name="mobile_robot")
@@ -229,7 +229,7 @@ class TestComplexRobotRoundtrip:
         robot.add_link(
             Link(
                 name="base_link",
-                visuals=[Visual(geometry=Box(size=Vector3(0.5, 0.3, 0.2)))],
+                initial_visuals=[Visual(geometry=Box(size=Vector3(0.5, 0.3, 0.2)))],
                 inertial=Inertial(
                     mass=10.0,
                     inertia=InertiaTensor(ixx=0.1, ixy=0.0, ixz=0.0, iyy=0.1, iyz=0.0, izz=0.1),
@@ -287,8 +287,8 @@ class TestComplexRobotRoundtrip:
         right_trans = Transmission.create_simple(
             name="right_wheel_trans", joint_name="right_wheel_joint", hardware_interface="velocity"
         )
-        robot.transmissions.append(left_trans)
-        robot.transmissions.append(right_trans)
+        robot.add_transmission(left_trans)
+        robot.add_transmission(right_trans)
 
         # Gazebo elements
         # Differential drive plugin
@@ -304,10 +304,10 @@ class TestComplexRobotRoundtrip:
                 "odometry_topic": "odom",
             },
         )
-        robot.gazebo_elements.append(GazeboElement(reference=None, plugins=[diff_drive_plugin]))
+        robot.add_gazebo_element(GazeboElement(reference=None, plugins=[diff_drive_plugin]))
 
         # Link friction
-        robot.gazebo_elements.append(
+        robot.add_gazebo_element(
             GazeboElement(reference="base_link", mu1=0.5, mu2=0.5, material="Gazebo/Grey")
         )
 

@@ -6,15 +6,23 @@ robot descriptions into the Blender environment.
 
 from __future__ import annotations
 
+import typing
 from contextlib import suppress
 from pathlib import Path
 
 import bpy
-from bpy.types import Context, Operator
 from bpy_extras.io_utils import ImportHelper
+from linkforge_core.logging_config import get_logger
 
-from ...linkforge_core.logging_config import get_logger
-from ..utils.decorators import safe_execute
+from ..utils.decorators import OperatorReturn, safe_execute
+from ..utils.scene_utils import clear_stats_cache
+
+if typing.TYPE_CHECKING:
+    from bpy.types import Context, Operator
+else:
+    # Runtime fallback for mock environments where bpy.types might be partially loaded.
+    Context = typing.Any
+    Operator = getattr(getattr(bpy, "types", object), "Operator", object)
 
 logger = get_logger(__name__)
 
@@ -40,11 +48,11 @@ class LINKFORGE_OT_import_urdf(Operator, ImportHelper):  # type: ignore[misc]
     )
 
     # Type ignore to resolve 'misc' definition collision with Operator.check
-    def check(self, context: Context) -> bool:  # type: ignore
+    def check(self, _context: Context) -> typing.Any:
         """Check if the operator can update its properties.
 
         Args:
-            context: The current Blender context.
+            _context: The current Blender context (unused, required by API).
 
         Returns:
             True to indicate the properties have changed and the UI needs update.
@@ -52,7 +60,7 @@ class LINKFORGE_OT_import_urdf(Operator, ImportHelper):  # type: ignore[misc]
         return True
 
     @safe_execute
-    def execute(self, context: Context) -> set[str]:
+    def execute(self, context: Context) -> OperatorReturn:
         """Execute the robot import process.
 
         Args:
@@ -61,7 +69,7 @@ class LINKFORGE_OT_import_urdf(Operator, ImportHelper):  # type: ignore[misc]
         Returns:
             Set containing the execution state (e.g., {'FINISHED'} or {'CANCELLED'}).
         """
-        from ...linkforge_core.parsers import URDFParser
+        from linkforge_core.parsers import URDFParser
 
         # Parse URDF/XACRO file
         urdf_path = Path(self.filepath)
@@ -104,7 +112,7 @@ class LINKFORGE_OT_import_urdf(Operator, ImportHelper):  # type: ignore[misc]
         is_xacro = urdf_path.suffix == ".xacro" or urdf_path.name.endswith(".urdf.xacro")
 
         # Detect Sandbox Root for security (allows sibling folders like meshes/)
-        from ...linkforge_core.validation.security import find_sandbox_root
+        from linkforge_core.validation.security import find_sandbox_root
 
         sandbox_root = find_sandbox_root(urdf_path)
         logger.info(f"Importing robot from: {urdf_path}")
@@ -113,13 +121,30 @@ class LINKFORGE_OT_import_urdf(Operator, ImportHelper):  # type: ignore[misc]
         # Smart Import Logic:
         # 1. If it looks like URDF, try parsing as URDF.
         # 2. If parsing fails because of Xacro tags, catch the error and switch to Xacro mode.
-        from ...linkforge_core import RobotParserError, XacroDetectedError
+        from linkforge_core import RobotParserError, XacroDetectedError
+        from linkforge_core.base import FileSystemResolver
+
+        # Read additional package paths from preferences
+        from ..preferences import get_addon_prefs
+
+        prefs = get_addon_prefs(context)
+        additional_paths = []
+        if prefs and hasattr(prefs, "additional_search_paths") and prefs.additional_search_paths:
+            import os
+
+            # Split by comma or os.pathsep (collapsing spaces)
+            raw_paths = prefs.additional_search_paths.replace(",", os.pathsep).split(os.pathsep)
+            additional_paths = [Path(p.strip()) for p in raw_paths if p.strip()]
+
+        resolver = FileSystemResolver(additional_search_paths=additional_paths)
 
         try:
             if not is_xacro:
                 try:
                     # Attempt standard URDF import
-                    robot = URDFParser(sandbox_root=sandbox_root).parse(urdf_path)
+                    robot = URDFParser(sandbox_root=sandbox_root, resource_resolver=resolver).parse(
+                        urdf_path
+                    )
                 except XacroDetectedError:
                     # Explicitly detected Xacro, enable fallback
                     self.report(
@@ -135,16 +160,19 @@ class LINKFORGE_OT_import_urdf(Operator, ImportHelper):  # type: ignore[misc]
             # XACRO PROCESSING (Triggered by extension OR fallback detection)
             if is_xacro:
                 # Convert XACRO to URDF using native XacroResolver
-                from ...linkforge_core.parsers import XacroResolver
+                from linkforge_core.parsers import XacroResolver
 
                 self.report({"INFO"}, f"Processing XACRO file: {urdf_path.name}")
 
-                resolver = XacroResolver()
-                urdf_string = resolver.resolve_file(urdf_path)
+                # Pass the additional paths so XACRO includes can find package:// references
+                xacro_resolver = XacroResolver(search_paths=additional_paths)
+                urdf_string = xacro_resolver.resolve_file(urdf_path)
 
                 # Parse URDF string with directory for mesh path validation
                 self.report({"INFO"}, "Parsing URDF...")
-                robot = URDFParser(sandbox_root=sandbox_root).parse_string(
+                robot = URDFParser(
+                    sandbox_root=sandbox_root, resource_resolver=resolver
+                ).parse_string(
                     urdf_string,
                     urdf_directory=urdf_path.parent,
                     default_name=urdf_path.stem,
@@ -157,11 +185,19 @@ class LINKFORGE_OT_import_urdf(Operator, ImportHelper):  # type: ignore[misc]
             logger.exception("Import process crashed")
             return {"CANCELLED"}
 
-        # Validate robot structure
-        from ...linkforge_core.validation import RobotValidator
+        if not robot.links and not robot.joints:
+            self.report(
+                {"ERROR"},
+                f"The file '{urdf_path.name}' contains no links or joints. "
+                "It may be a macro-only XACRO file. Please import the top-level robot description instead.",
+            )
+            return {"CANCELLED"}
 
-        validator = RobotValidator(robot)
-        result = validator.validate()
+        # Validate robot structure
+        from linkforge_core.validation import RobotValidator
+
+        validator = RobotValidator()
+        result = validator.validate(robot)
 
         if not result.is_valid:
             # Report the most critical errors via popups/info bar
@@ -192,6 +228,7 @@ class LINKFORGE_OT_import_urdf(Operator, ImportHelper):  # type: ignore[misc]
             {"INFO"},
             f"Started background import of {file_type}: '{robot.name}'...",
         )
+        clear_stats_cache()
         return {"FINISHED"}
 
 

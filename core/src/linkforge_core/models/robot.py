@@ -1,23 +1,28 @@
-"""Robot model representing a complete description in LinkForge.
+"""Central Robot model representing the LinkForge Intermediate Representation (IR).
 
-This module provides the central `Robot` class, which serves as the source
-of truth for all kinematic, physical, and sensor data.
+This module provides the core `Robot` class, which serves as the central
+hub for all kinematic, physical, and sensor data within the LinkForge ecosystem.
 """
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Sequence
 from dataclasses import InitVar, dataclass, field
+from pathlib import Path
 from typing import Any
 
-from ..exceptions import RobotModelError
+from ..base import FileSystemResolver, IResourceResolver
+from ..exceptions import RobotValidationError, ValidationErrorCode
 from ..utils.string_utils import is_valid_urdf_name
 from .gazebo import GazeboElement
 from .graph import KinematicGraph
 from .joint import Joint
 from .link import Link
+from .material import Material
 from .ros2_control import Ros2Control
 from .sensor import Sensor
+from .srdf import SemanticRobotDescription
 from .transmission import Transmission
 
 
@@ -25,89 +30,348 @@ from .transmission import Transmission
 class Robot:
     """Complete robot description containing links, joints, and metadata.
 
-    Performance Note:
-        Uses O(1) hash map lookups for links and joints. The kinematic structure
-        is externally managed via the `KinematicGraph` property.
+    The Robot class acts as the central hub of the LinkForge Intermediate
+    Representation (IR). It maintains a collection of rigid bodies (Links)
+    connected by kinematic constraints (Joints), along with sensors,
+    transmissions, and format-specific metadata.
+
+    Attributes:
+        name: Unique identifier for the robot.
+        version: LinkForge IR schema version (e.g., '1.1').
+        materials: Global material library shared across links.
+        metadata: Arbitrary dictionary for format-specific extensions.
+        resource_resolver: Strategy for locating meshes and external files.
+
+    Note:
+        Uses O(1) hash map lookups for links and joints via internal indices.
+        The kinematic structure (parent-child tree) is managed via the
+        `graph` property.
     """
 
     name: str
     version: str = "1.1"  # LinkForge IR Version
-    sensors: list[Sensor] = field(default_factory=list)
-    transmissions: list[Transmission] = field(default_factory=list)
-    ros2_controls: list[Ros2Control] = field(default_factory=list)
-    gazebo_elements: list[GazeboElement] = field(default_factory=list)
+    materials: dict[str, Material] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+    resource_resolver: IResourceResolver = field(default_factory=FileSystemResolver)
 
     # Internal storage
     _links: list[Link] = field(default_factory=list, init=False)
     _joints: list[Joint] = field(default_factory=list, init=False)
+    _sensors: list[Sensor] = field(default_factory=list, init=False)
+    _transmissions: list[Transmission] = field(default_factory=list, init=False)
+    _ros2_controls: list[Ros2Control] = field(default_factory=list, init=False)
+    _gazebo_elements: list[GazeboElement] = field(default_factory=list, init=False)
+    _semantic: SemanticRobotDescription | None = field(default=None, init=False)
 
     # Fast lookup indices (name -> object)
     _link_index: dict[str, Link] = field(default_factory=dict, init=False)
     _joint_index: dict[str, Joint] = field(default_factory=dict, init=False)
     _sensor_index: dict[str, Sensor] = field(default_factory=dict, init=False, repr=False)
 
+    _graph_cache: KinematicGraph | None = field(default=None, init=False, repr=False)
+
     # Init args
     initial_links: InitVar[Sequence[Link] | None] = None
     initial_joints: InitVar[Sequence[Joint] | None] = None
+    initial_sensors: InitVar[Sequence[Sensor] | None] = None
+    initial_transmissions: InitVar[Sequence[Transmission] | None] = None
+    initial_ros2_controls: InitVar[Sequence[Ros2Control] | None] = None
+    initial_gazebo_elements: InitVar[Sequence[GazeboElement] | None] = None
+    initial_semantic: InitVar[SemanticRobotDescription | None] = None
 
     def __post_init__(
         self,
         initial_links: Sequence[Link] | None,
         initial_joints: Sequence[Joint] | None,
+        initial_sensors: Sequence[Sensor] | None = None,
+        initial_transmissions: Sequence[Transmission] | None = None,
+        initial_ros2_controls: Sequence[Ros2Control] | None = None,
+        initial_gazebo_elements: Sequence[GazeboElement] | None = None,
+        initial_semantic: SemanticRobotDescription | None = None,
     ) -> None:
         """Initialize and index the robot structure."""
         if not self.name:
-            raise RobotModelError("Robot name cannot be empty")
+            raise RobotValidationError(
+                ValidationErrorCode.NAME_EMPTY,
+                "Robot name cannot be empty",
+                target="RobotName",
+                value=self.name,
+            )
 
         # Validate naming convention
         if not is_valid_urdf_name(self.name):
-            raise RobotModelError(
-                f"Robot name '{self.name}' contains invalid characters. "
-                "Use only alphanumeric, underscore, or hyphen."
+            raise RobotValidationError(
+                ValidationErrorCode.INVALID_NAME,
+                "Invalid name format",
+                target="RobotName",
+                value=self.name,
             )
 
         # Initialize storage
         if initial_links:
-            self._links.extend(initial_links)
+            for link in initial_links:
+                self.add_link(link)
         if initial_joints:
-            self._joints.extend(initial_joints)
+            for joint in initial_joints:
+                self.add_joint(joint)
+        if initial_sensors:
+            for sensor in initial_sensors:
+                self.add_sensor(sensor)
+        if initial_transmissions:
+            for trans in initial_transmissions:
+                self.add_transmission(trans)
+        if initial_ros2_controls:
+            for ros2_ctrl in initial_ros2_controls:
+                self.add_ros2_control(ros2_ctrl)
+        if initial_gazebo_elements:
+            for gz in initial_gazebo_elements:
+                self.add_gazebo_element(gz)
+        if initial_semantic:
+            self._semantic = initial_semantic
 
-        # Build indices
+        self._reindex()
+
+    def _reindex(self) -> None:
+        """Rebuild internal lookup indices and clear cache."""
+        # Validate link names and build index
         self._link_index = {}
         for link in self._links:
             if link.name in self._link_index:
-                raise RobotModelError(f"Duplicate link name: {link.name}")
+                raise RobotValidationError(
+                    ValidationErrorCode.DUPLICATE_NAME,
+                    f"Already exists: Link '{link.name}'",
+                    target="Link",
+                    value=link.name,
+                )
             self._link_index[link.name] = link
 
+        # Validate joint names and build index
         self._joint_index = {}
         for joint in self._joints:
             if joint.name in self._joint_index:
-                raise RobotModelError(f"Duplicate joint name: {joint.name}")
+                raise RobotValidationError(
+                    ValidationErrorCode.DUPLICATE_NAME,
+                    f"Already exists: Joint '{joint.name}'",
+                    target="Joint",
+                    value=joint.name,
+                )
             self._joint_index[joint.name] = joint
 
-        self._sensor_index = {sensor.name: sensor for sensor in self.sensors}
+        self._sensor_index = {sensor.name: sensor for sensor in self._sensors}
+        self._graph_cache = None
+
+    def clone(self) -> Robot:
+        """Create a deep copy of the robot.
+
+        Returns:
+            A new Robot instance with identical links, joints, and metadata.
+        """
+        return copy.deepcopy(self)
+
+    def prefix_all(self, prefix: str) -> None:
+        """Add a prefix to all links, joints, sensors, and related elements.
+
+        This is used when merging robots into an assembly to prevent
+        name collisions.
+
+        Args:
+            prefix: The string to prepend to all names.
+        """
+        if not prefix:
+            return
+
+        from dataclasses import replace
+
+        # 1. Update Links (Mutable)
+        for link in self._links:
+            link.name = f"{prefix}{link.name}"
+
+        # 2. Update Joints (Frozen)
+        new_joints = []
+        for joint in self._joints:
+            new_joint = replace(
+                joint,
+                name=f"{prefix}{joint.name}",
+                parent=f"{prefix}{joint.parent}",
+                child=f"{prefix}{joint.child}",
+            )
+            if joint.mimic:
+                new_joint = replace(
+                    new_joint,
+                    mimic=replace(joint.mimic, joint=f"{prefix}{joint.mimic.joint}"),
+                )
+            new_joints.append(new_joint)
+        self._joints = new_joints
+
+        # 3. Update Sensors (Frozen)
+        new_sensors = []
+        for sensor in self._sensors:
+            new_sensor = replace(
+                sensor,
+                name=f"{prefix}{sensor.name}",
+                link_name=f"{prefix}{sensor.link_name}",
+            )
+            if sensor.contact_info:
+                new_sensor = replace(
+                    new_sensor,
+                    contact_info=replace(
+                        sensor.contact_info,
+                        collision=f"{prefix}{sensor.contact_info.collision}",
+                    ),
+                )
+            new_sensors.append(new_sensor)
+        self._sensors = new_sensors
+
+        # 4. Update Transmissions (Frozen)
+        new_transmissions = []
+        for trans in self._transmissions:
+            new_trans = replace(
+                trans,
+                name=f"{prefix}{trans.name}",
+                joints=[replace(tj, name=f"{prefix}{tj.name}") for tj in trans.joints],
+                actuators=[replace(ta, name=f"{prefix}{ta.name}") for ta in trans.actuators],
+            )
+            new_transmissions.append(new_trans)
+        self._transmissions = new_transmissions
+
+        # 5. Update ROS2 Controls (Mutable)
+        for rc in self._ros2_controls:
+            rc.name = f"{prefix}{rc.name}"
+            for rc_joint in rc.joints:
+                rc_joint.name = f"{prefix}{rc_joint.name}"
+
+        # 6. Update Gazebo Elements (Frozen)
+        new_gazebo_elements = []
+        for ge in self._gazebo_elements:
+            new_ge = replace(ge, reference=f"{prefix}{ge.reference}" if ge.reference else None)
+            new_gazebo_elements.append(new_ge)
+        self._gazebo_elements = new_gazebo_elements
+
+        # 7. Update Semantic Description (Frozen)
+        if self._semantic:
+            s = self._semantic
+            self._semantic = replace(
+                s,
+                virtual_joints=[
+                    replace(
+                        vj,
+                        name=f"{prefix}{vj.name}",
+                        child_link=f"{prefix}{vj.child_link}",
+                    )
+                    for vj in s.virtual_joints
+                ],
+                groups=[
+                    replace(
+                        g,
+                        name=f"{prefix}{g.name}",
+                        links=[f"{prefix}{link_name}" for link_name in g.links],
+                        joints=[f"{prefix}{joint_name}" for joint_name in g.joints],
+                        chains=[
+                            (f"{prefix}{base_name}", f"{prefix}{tip_name}")
+                            for base_name, tip_name in g.chains
+                        ],
+                        subgroups=[f"{prefix}{subgroup_name}" for subgroup_name in g.subgroups],
+                    )
+                    for g in s.groups
+                ],
+                group_states=[
+                    replace(
+                        gs,
+                        name=f"{prefix}{gs.name}",
+                        group=f"{prefix}{gs.group}",
+                        joint_values={f"{prefix}{k}": v for k, v in gs.joint_values.items()},
+                    )
+                    for gs in s.group_states
+                ],
+                end_effectors=[
+                    replace(
+                        ee,
+                        name=f"{prefix}{ee.name}",
+                        group=f"{prefix}{ee.group}",
+                        parent_link=f"{prefix}{ee.parent_link}",
+                        parent_group=f"{prefix}{ee.parent_group}" if ee.parent_group else None,
+                    )
+                    for ee in s.end_effectors
+                ],
+                passive_joints=[replace(pj, name=f"{prefix}{pj.name}") for pj in s.passive_joints],
+                disabled_collisions=[
+                    replace(dc, link1=f"{prefix}{dc.link1}", link2=f"{prefix}{dc.link2}")
+                    for dc in s.disabled_collisions
+                ],
+            )
+
+        self._reindex()
 
     def add_link(self, link: Link) -> None:
-        """Add a link to the robot and update indices."""
+        """Add a link to the robot and update indices.
+
+        Args:
+            link: The Link object to add.
+
+        Raises:
+            RobotValidationError: If a link with the same name already exists
+                or if naming conventions are violated.
+        """
         if link.name in self._link_index:
-            raise RobotModelError(f"Link '{link.name}' already exists")
+            raise RobotValidationError(
+                ValidationErrorCode.DUPLICATE_NAME,
+                f"Already exists: Link '{link.name}'",
+                target="Link",
+                value=link.name,
+            )
         self._links.append(link)
         self._link_index[link.name] = link
+        self._graph_cache = None
 
     def add_joint(self, joint: Joint) -> None:
-        """Add a joint to the robot and update indices."""
+        """Add a joint to the robot and update indices.
+
+        Args:
+            joint: The Joint object to add.
+
+        Raises:
+            RobotValidationError: If the joint name is a duplicate or if the
+                referenced parent/child links do not exist.
+        """
         if joint.name in self._joint_index:
-            raise RobotModelError(f"Joint '{joint.name}' already exists")
+            raise RobotValidationError(
+                ValidationErrorCode.DUPLICATE_NAME,
+                f"Already exists: Joint '{joint.name}'",
+                target="Joint",
+                value=joint.name,
+            )
 
         # Validate parent and child links exist
         if joint.parent not in self._link_index:
-            raise RobotModelError(f"Parent link '{joint.parent}' not found")
+            raise RobotValidationError(
+                ValidationErrorCode.NOT_FOUND,
+                f"Not found: Parent link '{joint.parent}'",
+                target="ParentLink",
+                value=joint.parent,
+            )
         if joint.child not in self._link_index:
-            raise RobotModelError(f"Child link '{joint.child}' not found")
+            raise RobotValidationError(
+                ValidationErrorCode.NOT_FOUND,
+                f"Not found: Child link '{joint.child}'",
+                target="ChildLink",
+                value=joint.child,
+            )
 
         self._joints.append(joint)
         self._joint_index[joint.name] = joint
+        self._graph_cache = None
+
+    def resolve_resource(self, uri: str, relative_to: Path | None = None) -> Path:
+        """Resolve a resource URI using the robot's configured resolver.
+
+        Args:
+            uri: The resource URI to resolve (e.g. mesh path, package://).
+            relative_to: Optional base directory for relative path resolution.
+
+        Returns:
+            The resolved absolute Path.
+        """
+        return self.resource_resolver.resolve(uri, relative_to=relative_to)
 
     def get_link(self, name: str) -> Link | None:
         """Get link by name - O(1) lookup."""
@@ -125,8 +389,7 @@ class Robot:
             as_parent: If True, get joints where link is parent; if False, where link is child
 
         Returns:
-            List of matching joints
-
+            List of matching joints.
         """
         if as_parent:
             return [joint for joint in self.joints if joint.parent == link_name]
@@ -136,28 +399,46 @@ class Robot:
     def add_sensor(self, sensor: Sensor) -> None:
         """Add a sensor to the robot and update indices."""
         if sensor.name in self._sensor_index:
-            raise RobotModelError(f"Sensor '{sensor.name}' already exists")
+            raise RobotValidationError(
+                ValidationErrorCode.DUPLICATE_NAME,
+                f"Already exists: Sensor '{sensor.name}'",
+                target="Sensor",
+                value=sensor.name,
+            )
 
         # Validate that the link exists
         if sensor.link_name not in self._link_index:
-            raise RobotModelError(f"Sensor '{sensor.name}': link '{sensor.link_name}' not found")
+            raise RobotValidationError(
+                ValidationErrorCode.NOT_FOUND,
+                f"Not found: Link '{sensor.link_name}'",
+                target="LinkName",
+                value=sensor.link_name,
+            )
 
-        self.sensors.append(sensor)
+        self._sensors.append(sensor)
         self._sensor_index[sensor.name] = sensor
 
     def add_transmission(self, transmission: Transmission) -> None:
         """Add a transmission to the robot."""
-        if any(t.name == transmission.name for t in self.transmissions):
-            raise RobotModelError(f"Transmission '{transmission.name}' already exists")
+        if any(t.name == transmission.name for t in self._transmissions):
+            raise RobotValidationError(
+                ValidationErrorCode.DUPLICATE_NAME,
+                f"Already exists: Transmission '{transmission.name}'",
+                target="Transmission",
+                value=transmission.name,
+            )
 
         # Validate that all referenced joints exist
         for trans_joint in transmission.joints:
             if trans_joint.name not in self._joint_index:
-                raise RobotModelError(
-                    f"Transmission '{transmission.name}': joint '{trans_joint.name}' not found"
+                raise RobotValidationError(
+                    ValidationErrorCode.NOT_FOUND,
+                    f"Not found: Joint '{trans_joint.name}'",
+                    target="JointName",
+                    value=trans_joint.name,
                 )
 
-        self.transmissions.append(transmission)
+        self._transmissions.append(transmission)
 
     def add_gazebo_element(self, element: GazeboElement) -> None:
         """Add a Gazebo element to the robot."""
@@ -167,28 +448,38 @@ class Robot:
             and self.get_link(element.reference) is None
             and self.get_joint(element.reference) is None
         ):
-            raise RobotModelError(
-                f"Gazebo element reference '{element.reference}' does not match any link or joint"
+            raise RobotValidationError(
+                ValidationErrorCode.NOT_FOUND,
+                f"Not found: Gazebo reference '{element.reference}'",
+                target="GazeboReference",
+                value=element.reference,
             )
 
-        self.gazebo_elements.append(element)
+        self._gazebo_elements.append(element)
 
     def add_ros2_control(self, ros2_control: Ros2Control) -> None:
         """Add a ROS2 Control configuration to the robot."""
         # Check for duplicate names
-        if any(rc.name == ros2_control.name for rc in self.ros2_controls):
-            raise RobotModelError(f"ROS2 Control '{ros2_control.name}' already exists")
+        if any(rc.name == ros2_control.name for rc in self._ros2_controls):
+            raise RobotValidationError(
+                ValidationErrorCode.DUPLICATE_NAME,
+                f"Already exists: ROS2 control '{ros2_control.name}'",
+                target="Ros2Control",
+                value=ros2_control.name,
+            )
 
-        self.ros2_controls.append(ros2_control)
+        self._ros2_controls.append(ros2_control)
 
     @property
     def graph(self) -> KinematicGraph:
         """Get the formal kinematic graph representing the robot's structure.
 
-        This is built on demand to ensure it reflects the current state of links and joints.
-        Useful for validation and structural traversal.
+        This is built on demand (and cached) to ensure it reflects the current state
+        of links and joints with optimal performance.
         """
-        return KinematicGraph(self._links, self._joints)
+        if self._graph_cache is None:
+            self._graph_cache = KinematicGraph(self._links, self._joints)
+        return self._graph_cache
 
     def get_root_link(self) -> Link | None:
         """Get the root link of the kinematic tree.
@@ -200,9 +491,19 @@ class Robot:
 
         roots = self.graph.get_root_links()
         if not roots:
-            raise RobotModelError("No root link found (circular dependency detected)")
+            raise RobotValidationError(
+                ValidationErrorCode.NO_ROOT,
+                "No root link found in the kinematic tree",
+                target="Roots",
+                value=0,
+            )
         if len(roots) > 1:
-            raise RobotModelError(f"Multiple root links found: {roots}")
+            raise RobotValidationError(
+                ValidationErrorCode.MULTIPLE_ROOTS,
+                f"Multiple root links found ({len(roots)}): {roots}",
+                target="Roots",
+                value=len(roots),
+            )
 
         return self.get_link(roots[0])
 
@@ -236,8 +537,38 @@ class Robot:
         """
         return tuple(self._joints)
 
+    @property
+    def sensors(self) -> tuple[Sensor, ...]:
+        """Get read-only view of sensors."""
+        return tuple(self._sensors)
+
+    @property
+    def transmissions(self) -> tuple[Transmission, ...]:
+        """Get read-only view of transmissions."""
+        return tuple(self._transmissions)
+
+    @property
+    def ros2_controls(self) -> tuple[Ros2Control, ...]:
+        """Get read-only view of ROS2 Control configurations."""
+        return tuple(self._ros2_controls)
+
+    @property
+    def gazebo_elements(self) -> tuple[GazeboElement, ...]:
+        """Get read-only view of Gazebo elements."""
+        return tuple(self._gazebo_elements)
+
+    @property
+    def semantic(self) -> SemanticRobotDescription | None:
+        """Get semantic description (SRDF metadata) of the robot."""
+        return self._semantic
+
+    @semantic.setter
+    def semantic(self, value: SemanticRobotDescription | None) -> None:
+        """Set semantic description of the robot."""
+        self._semantic = value
+
     def __str__(self) -> str:
-        """String representation."""
+        """Return a human-readable summary of the robot structure."""
         parts = [
             f"Robot(name={self.name}",
             f"links={len(self.links)}",

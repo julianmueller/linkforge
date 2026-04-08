@@ -5,9 +5,8 @@ from __future__ import annotations
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
 
-from ..exceptions import RobotModelError
+from ..exceptions import RobotPhysicsError, ValidationErrorCode
 
 
 class GeometryType(Enum):
@@ -72,8 +71,11 @@ class Box:
     def __post_init__(self) -> None:
         """Validate box dimensions."""
         if self.size.x <= 0 or self.size.y <= 0 or self.size.z <= 0:
-            raise RobotModelError(
-                f"Box dimensions must be positive, got size=({self.size.x}, {self.size.y}, {self.size.z})"
+            raise RobotPhysicsError(
+                ValidationErrorCode.PHYSICS_VIOLATION,
+                "Box dimensions must be positive",
+                target="BoxSize",
+                value=self.size,
             )
 
     @property
@@ -95,9 +97,19 @@ class Cylinder:
     def __post_init__(self) -> None:
         """Validate cylinder dimensions."""
         if self.radius <= 0:
-            raise RobotModelError(f"Cylinder radius must be positive, got radius={self.radius}")
+            raise RobotPhysicsError(
+                ValidationErrorCode.PHYSICS_VIOLATION,
+                "Cylinder radius must be positive",
+                target="CylinderRadius",
+                value=self.radius,
+            )
         if self.length <= 0:
-            raise RobotModelError(f"Cylinder length must be positive, got length={self.length}")
+            raise RobotPhysicsError(
+                ValidationErrorCode.PHYSICS_VIOLATION,
+                "Cylinder length must be positive",
+                target="CylinderLength",
+                value=self.length,
+            )
 
     @property
     def type(self) -> GeometryType:
@@ -119,7 +131,12 @@ class Sphere:
     def __post_init__(self) -> None:
         """Validate sphere dimensions."""
         if self.radius <= 0:
-            raise RobotModelError(f"Sphere radius must be positive, got radius={self.radius}")
+            raise RobotPhysicsError(
+                ValidationErrorCode.PHYSICS_VIOLATION,
+                "Sphere radius must be positive",
+                target="SphereRadius",
+                value=self.radius,
+            )
 
     @property
     def type(self) -> GeometryType:
@@ -134,16 +151,19 @@ class Sphere:
 
 @dataclass(frozen=True)
 class Mesh:
-    """Mesh geometry from file."""
+    """Mesh geometry from file or URI."""
 
-    filepath: Path
+    resource: str
     scale: Vector3 = field(default_factory=lambda: Vector3(1.0, 1.0, 1.0))
 
     def __post_init__(self) -> None:
         """Validate mesh scale."""
-        if self.scale.x <= 0 or self.scale.y <= 0 or self.scale.z <= 0:
-            raise RobotModelError(
-                f"Mesh scale must be positive, got scale=({self.scale.x}, {self.scale.y}, {self.scale.z})"
+        if self.scale.x == 0 or self.scale.y == 0 or self.scale.z == 0:
+            raise RobotPhysicsError(
+                ValidationErrorCode.PHYSICS_VIOLATION,
+                "Mesh scale components must be non-zero",
+                target="MeshScale",
+                value=self.scale,
             )
 
     @property

@@ -6,7 +6,7 @@ from linkforge_core.models import Joint, JointType, Link
 from linkforge_core.utils.kinematics import sort_joints_topological
 
 
-def test_sort_joints_topological():
+def test_sort_joints_topological() -> None:
     """Test that joints are sorted correctly (parents before children)."""
     # Create links
     base = Link(name="base")
@@ -32,8 +32,8 @@ def test_sort_joints_topological():
     assert {sorted_joints[1].name, sorted_joints[2].name} == {"j2", "j3"}
 
 
-def test_sort_joints_diamond_structure():
-    """Test topological sort with a diamond structure.
+def test_sort_joints_diamond_structure() -> None:
+    r"""Test topological sort with a diamond structure.
 
     This ensures that links visited via multiple paths (like link3 below)
     are handled correctly by the visited set check.

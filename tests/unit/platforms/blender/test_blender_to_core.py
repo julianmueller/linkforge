@@ -2,7 +2,6 @@ from pathlib import Path
 
 import bpy
 import pytest
-from linkforge.linkforge_core.exceptions import RobotModelError
 
 try:
     import importlib.util
@@ -23,7 +22,8 @@ from linkforge.blender.adapters.blender_to_core import (
     sanitize_name,
     scene_to_robot,
 )
-from linkforge.linkforge_core.models import (
+from linkforge_core.exceptions import RobotValidationError, ValidationErrorCode
+from linkforge_core.models import (
     Box,
     Cylinder,
     JointType,
@@ -34,7 +34,7 @@ from linkforge.linkforge_core.models import (
 from mathutils import Euler, Matrix
 
 
-def test_matrix_to_transform_precision():
+def test_matrix_to_transform_precision() -> None:
     """Verify that matrix_to_transform correctly extracts XYZ/RPY from a real Matrix."""
     # Create a matrix with specific translation and rotation in XYZ order (URDF Standard)
     m = Matrix.Translation((1.0, 2.0, 3.0)) @ Euler((0.4, 0.5, 0.6), "XYZ").to_matrix().to_4x4()
@@ -49,7 +49,7 @@ def test_matrix_to_transform_precision():
     assert pytest.approx(transform.rpy.z) == 0.6
 
 
-def test_get_object_geometry_sphere_cylinder():
+def test_get_object_geometry_sphere_cylinder() -> None:
     """Verify auto-detection of sphere and cylinder primitives via get_object_geometry."""
     # 1. Sphere
     bpy.ops.mesh.primitive_uv_sphere_add(radius=0.5)
@@ -69,21 +69,21 @@ def test_get_object_geometry_sphere_cylinder():
     assert world_matrix == c_obj.matrix_world
 
 
-def test_detect_primitive_type_box():
+def test_detect_primitive_type_box() -> None:
     """Verify that a basic cube mesh is detected as BOX."""
     bpy.ops.mesh.primitive_cube_add(size=2.0)
     obj = bpy.context.active_object
     assert detect_primitive_type(obj) == "BOX"
 
 
-def test_detect_primitive_type_sphere():
+def test_detect_primitive_type_sphere() -> None:
     """Verify that a UV sphere is detected as SPHERE."""
     bpy.ops.mesh.primitive_uv_sphere_add(radius=1.0)
     obj = bpy.context.active_object
     assert detect_primitive_type(obj) == "SPHERE"
 
 
-def test_detect_primitive_type_cylinder():
+def test_detect_primitive_type_cylinder() -> None:
     """Verify that a cylinder is detected as CYLINDER."""
     # Dimensions must not be 1:1:1 to avoid sphere detection
     bpy.ops.mesh.primitive_cylinder_add(radius=1.0, depth=3.0)
@@ -91,14 +91,14 @@ def test_detect_primitive_type_cylinder():
     assert detect_primitive_type(obj) == "CYLINDER"
 
 
-def test_detect_primitive_type_none_case():
+def test_detect_primitive_type_none_case() -> None:
     """A complex mesh (Monkey) should return None for primitive detection."""
     bpy.ops.mesh.primitive_monkey_add()
     obj = bpy.context.active_object
     assert detect_primitive_type(obj) is None
 
 
-def test_blender_joint_to_core_conversion():
+def test_blender_joint_to_core_conversion() -> None:
     """Verify that a Blender joint object is correctly converted back to Core Joint."""
     # 1. Setup Parent Link
     bpy.ops.object.empty_add(type="PLAIN_AXES")
@@ -133,7 +133,7 @@ def test_blender_joint_to_core_conversion():
         props.limit_upper = 1.0
 
     # 4. Convert
-    joint = blender_joint_to_core(joint_obj, bpy.context.scene)
+    joint = blender_joint_to_core(joint_obj)
 
     # 5. Verify
     assert joint is not None
@@ -142,7 +142,7 @@ def test_blender_joint_to_core_conversion():
     assert pytest.approx(joint.axis.y) == 1.0
 
 
-def test_blender_sensor_to_core_lidar():
+def test_blender_sensor_to_core_lidar() -> None:
     """Verify that a Blender sensor object is correctly converted back to Core Sensor."""
     # 1. Setup Parent Link
     bpy.ops.object.empty_add(type="PLAIN_AXES")
@@ -175,7 +175,7 @@ def test_blender_sensor_to_core_lidar():
     assert sensor.link_name == "base_link"
 
 
-def test_blender_link_to_core_inertia():
+def test_blender_link_to_core_inertia() -> None:
     """Verify that inertial properties are correctly extracted from Blender objects."""
     bpy.ops.object.empty_add()
     obj = bpy.context.active_object
@@ -192,7 +192,7 @@ def test_blender_link_to_core_inertia():
     assert link.inertial.inertia.ixx == 1.0
 
 
-def test_categorize_scene_objects_logic():
+def test_categorize_scene_objects_logic() -> None:
     """Verify that scene objects are correctly categorized as links, joints, or sensors."""
     # 1. Setup Scene
     bpy.ops.object.empty_add()
@@ -224,7 +224,7 @@ def test_categorize_scene_objects_logic():
     assert root[0] == "l_link"
 
 
-def test_calculate_link_frames_logic():
+def test_calculate_link_frames_logic() -> None:
     """Verify recursive frame calculation with real objects."""
     # 1. Setup Hierarchy
     bpy.ops.object.empty_add()
@@ -254,7 +254,7 @@ def test_calculate_link_frames_logic():
     assert pytest.approx(frames["child"].to_translation().x) == 1.0
 
 
-def test_get_object_material_logic():
+def test_get_object_material_logic() -> None:
     """Verify material extraction from Principled BSDF node."""
     bpy.ops.mesh.primitive_cube_add()
     obj = bpy.context.active_object
@@ -274,7 +274,7 @@ def test_get_object_material_logic():
     assert pytest.approx(material.color.g) == 0.2
 
 
-def test_blender_link_to_core_multi_elements():
+def test_blender_link_to_core_multi_elements() -> None:
     """Verify conversion of a link with multiple visuals back to Core."""
     bpy.ops.object.empty_add()
     link_obj = bpy.context.active_object
@@ -298,7 +298,7 @@ def test_blender_link_to_core_multi_elements():
     assert len(link.visuals) == 2
 
 
-def test_get_object_geometry_forced_primitives():
+def test_get_object_geometry_forced_primitives() -> None:
     """Verify that get_object_geometry honors forced primitive types."""
     bpy.ops.mesh.primitive_cube_add(size=2.0)
     obj = bpy.context.active_object
@@ -317,7 +317,7 @@ def test_get_object_geometry_forced_primitives():
     assert pytest.approx(geom_c.length) == 2.0
 
 
-def test_get_object_geometry_mesh_simplified(tmp_path):
+def test_get_object_geometry_mesh_simplified(tmp_path) -> None:
     """Verify that mesh simplification fallback is handled."""
     bpy.ops.mesh.primitive_cube_add()
     obj = bpy.context.active_object
@@ -327,8 +327,8 @@ def test_get_object_geometry_mesh_simplified(tmp_path):
     assert isinstance(geom, (Box, Mesh))
 
 
-def test_get_object_material_logic_no_nodes():
-    """Verify material extraction from Blender object (No Nodes)."""
+def test_get_object_material_logic_nodes() -> None:
+    """Verify material extraction from Blender object using Nodes (Modern)."""
     bpy.ops.mesh.primitive_cube_add()
     obj = bpy.context.active_object
 
@@ -336,9 +336,19 @@ def test_get_object_material_logic_no_nodes():
     obj.linkforge.use_material = True
 
     mat = bpy.data.materials.new(name="Test-Mat")
-    mat.use_nodes = False
-    mat.diffuse_color = (1, 0, 0, 1)
+    mat.use_nodes = True
+
+    # Set color via Principled BSDF (standard for Blender 4.2+)
+    nodes = mat.node_tree.nodes
+    bsdf = nodes.get("Principled BSDF")
+    if bsdf:
+        # Use "Base Color" input for standard Principled BSDF
+        bsdf.inputs["Base Color"].default_value = (1.0, 0.0, 0.0, 1.0)
+
+    # Clear and assign explicitly
+    obj.data.materials.clear()
     obj.data.materials.append(mat)
+    bpy.context.view_layer.update()
 
     core_mat = get_object_material(obj, obj.linkforge)
     assert core_mat is not None
@@ -346,7 +356,7 @@ def test_get_object_material_logic_no_nodes():
     assert "Test_Mat" in core_mat.name or "Test-Mat" in core_mat.name
 
 
-def test_sanitize_name_logic():
+def test_sanitize_name_logic() -> None:
     """Verify name sanitization for XACRO compatibility."""
     # Default allows hyphens
     assert sanitize_name("my-robot-link") == "my-robot-link"
@@ -356,7 +366,7 @@ def test_sanitize_name_logic():
     assert sanitize_name("123link") == "_123link"  # Correct behavior for leading digits
 
 
-def test_categorize_scene_objects_complex_hierarchy():
+def test_categorize_scene_objects_complex_hierarchy() -> None:
     """Verify categorization of a full robot hierarchy with sensors and joints."""
     # 1. Base Link
     bpy.ops.object.empty_add()
@@ -403,7 +413,7 @@ def test_categorize_scene_objects_complex_hierarchy():
     assert root_link[0] == "base_link"
 
 
-def test_blender_joint_to_core_types():
+def test_blender_joint_to_core_types() -> None:
     """Verify conversion of different joint types and parameters."""
     # Setup Parent/Child Links
     bpy.ops.object.empty_add()
@@ -430,7 +440,7 @@ def test_blender_joint_to_core_types():
     joint_obj.linkforge_joint.limit_effort = 100.0
     joint_obj.linkforge_joint.limit_velocity = 5.0
 
-    joint = blender_joint_to_core(joint_obj, bpy.context.scene)
+    joint = blender_joint_to_core(joint_obj)
 
     assert joint.type == JointType.PRISMATIC
     assert joint.axis.x == 1.0
@@ -439,12 +449,12 @@ def test_blender_joint_to_core_types():
 
     # 2. Continuous
     joint_obj.linkforge_joint.joint_type = "CONTINUOUS"
-    joint = blender_joint_to_core(joint_obj, bpy.context.scene)
+    joint = blender_joint_to_core(joint_obj)
     assert joint.type == JointType.CONTINUOUS
     # Continuous joints shouldn't have lower/upper limits in standard URDF but our model handles it.
 
 
-def test_blender_joint_to_core_advanced_props():
+def test_blender_joint_to_core_advanced_props() -> None:
     """Verify that safety controller and calibration are correctly synced to Core."""
     # 1. Setup Links
     bpy.ops.object.empty_add()
@@ -483,7 +493,7 @@ def test_blender_joint_to_core_advanced_props():
     props.use_calibration_falling = False
 
     # 3. Convert
-    joint = blender_joint_to_core(joint_obj, bpy.context.scene)
+    joint = blender_joint_to_core(joint_obj)
 
     # 4. Verify
     assert joint.safety_controller is not None
@@ -495,7 +505,7 @@ def test_blender_joint_to_core_advanced_props():
     assert joint.calibration.falling is None
 
 
-def test_blender_sensor_to_core_all_types():
+def test_blender_sensor_to_core_all_types() -> None:
     """Verify conversion of various sensor types and their properties."""
     from linkforge.blender.adapters.blender_to_core import blender_sensor_to_core
 
@@ -555,7 +565,7 @@ def test_blender_sensor_to_core_all_types():
     assert sensor.lidar_info.range_max == 50.0
 
 
-def test_detect_primitive_type_logic():
+def test_detect_primitive_type_logic() -> None:
     """Verify primitive detection heuristics."""
     from linkforge.blender.adapters.blender_to_core import detect_primitive_type
 
@@ -583,7 +593,7 @@ def test_detect_primitive_type_logic():
     assert detect_primitive_type(monkey) is None
 
 
-def test_matrix_to_transform_conversion():
+def test_matrix_to_transform_conversion() -> None:
     """Verify 4x4 matrix to Transform conversion."""
     import math
 
@@ -618,7 +628,7 @@ def test_matrix_to_transform_conversion():
     assert pytest.approx(tf.rpy.z) == 0.3
 
 
-def test_get_object_geometry_decimation(tmp_path):
+def test_get_object_geometry_decimation(tmp_path) -> None:
     """Verify that decimation (simplification) is active if requested."""
     # Create a reasonably complex object
     bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=16)
@@ -643,7 +653,7 @@ def test_get_object_geometry_decimation(tmp_path):
     assert isinstance(g2, Mesh)
 
 
-def test_get_object_geometry_dry_run(tmp_path):
+def test_get_object_geometry_dry_run(tmp_path) -> None:
     """Verify that dry_run skips side-effects (like mesh saving)."""
     bpy.ops.mesh.primitive_cube_add()
     obj = bpy.context.active_object
@@ -656,7 +666,7 @@ def test_get_object_geometry_dry_run(tmp_path):
     assert wm == obj.matrix_world
 
 
-def test_scene_to_robot_conversion():
+def test_scene_to_robot_conversion() -> None:
     """Verify that an entire Blender scene is converted to a Core Robot."""
     # 1. Setup a minimal link structure
     bpy.ops.object.empty_add(type="PLAIN_AXES")
@@ -676,7 +686,7 @@ def test_scene_to_robot_conversion():
     assert any(link.name == "base_link" for link in robot.links)
 
 
-def test_extract_mesh_triangles_logic():
+def test_extract_mesh_triangles_logic() -> None:
     """Test raw triangle extraction from a primitive."""
     bpy.ops.mesh.primitive_cube_add(size=1.0)
     obj = bpy.context.active_object
@@ -688,7 +698,7 @@ def test_extract_mesh_triangles_logic():
     assert len(tris) == 12
 
 
-def test_get_object_geometry_auto_primitive():
+def test_get_object_geometry_auto_primitive() -> None:
     """Test auto-detection of box primitive via get_object_geometry."""
     bpy.ops.mesh.primitive_cube_add(size=2.0)
     obj = bpy.context.active_object
@@ -700,7 +710,7 @@ def test_get_object_geometry_auto_primitive():
     assert pytest.approx(geom.size.x) == 2.0
 
 
-def test_blender_link_to_core_complex():
+def test_blender_link_to_core_complex() -> None:
     """Verify conversion of a link with multiple visuals and collisions back to Core."""
     # Ensure a clean state
     bpy.ops.object.select_all(action="DESELECT")
@@ -742,10 +752,10 @@ def test_blender_link_to_core_complex():
     assert pytest.approx(link.collisions[0].origin.xyz.y) == 1.0
 
 
-def test_blender_link_to_core_geometry_and_material():
+def test_blender_link_to_core_geometry_and_material() -> None:
     """Verify detailed geometry and material conversion."""
     from linkforge.blender.adapters.blender_to_core import blender_link_to_core_with_origin
-    from linkforge.linkforge_core.models import GeometryType
+    from linkforge_core.models import GeometryType
 
     # 1. Link Setup
     bpy.ops.object.empty_add()
@@ -797,7 +807,7 @@ def test_blender_link_to_core_geometry_and_material():
     assert coll.geometry.type == GeometryType.CYLINDER
 
 
-def test_robust_origin_extraction_logic():
+def test_robust_origin_extraction_logic() -> None:
     """Verify relative transform extraction between parent and child."""
     # Create parent
     bpy.ops.object.empty_add(type="PLAIN_AXES", location=(1, 1, 1))
@@ -822,7 +832,7 @@ def test_robust_origin_extraction_logic():
 # ============================================================================
 
 
-def test_blender_sensor_contact():
+def test_blender_sensor_contact() -> None:
     """Test conversion of contact sensor."""
     # Create parent link
     bpy.ops.object.empty_add()
@@ -849,7 +859,7 @@ def test_blender_sensor_contact():
     assert sensor.contact_info.collision == "collision_link"
 
 
-def test_blender_sensor_force_torque():
+def test_blender_sensor_force_torque() -> None:
     """Test conversion of force-torque sensor."""
     # Create parent link
     bpy.ops.object.empty_add()
@@ -876,7 +886,7 @@ def test_blender_sensor_force_torque():
     assert sensor.force_torque_info.frame == "child"
 
 
-def test_blender_sensor_with_noise():
+def test_blender_sensor_with_noise() -> None:
     """Test sensor conversion with noise parameters."""
     # Create parent link
     bpy.ops.object.empty_add()
@@ -905,7 +915,7 @@ def test_blender_sensor_with_noise():
     assert pytest.approx(sensor.imu_info.angular_velocity_noise.stddev) == 0.05
 
 
-def test_blender_sensor_with_plugin():
+def test_blender_sensor_with_plugin() -> None:
     """Test sensor conversion with Gazebo plugin."""
     # Create parent link
     bpy.ops.object.empty_add()
@@ -934,7 +944,7 @@ def test_blender_sensor_with_plugin():
     assert sensor.plugin.filename == "libmy_camera.so"
 
 
-def test_blender_sensor_not_robot_sensor():
+def test_blender_sensor_not_robot_sensor() -> None:
     """Test that non-robot sensor objects return None."""
     bpy.ops.object.empty_add()
     sensor_obj = bpy.context.active_object
@@ -950,7 +960,7 @@ def test_blender_sensor_not_robot_sensor():
 # ============================================================================
 
 
-def test_blender_joint_mimic_and_limits_advanced():
+def test_blender_joint_mimic_and_limits_advanced() -> None:
     """Verify joint mimicry conversion."""
     # Setup Links
     bpy.ops.object.empty_add()
@@ -981,14 +991,14 @@ def test_blender_joint_mimic_and_limits_advanced():
     j.linkforge_joint.mimic_multiplier = 2.0
     j.linkforge_joint.mimic_offset = 0.5
 
-    core = blender_joint_to_core(j, bpy.context.scene)
+    core = blender_joint_to_core(j)
     assert core.mimic is not None
     assert core.mimic.joint == "master_j"
     assert core.mimic.multiplier == 2.0
     assert core.mimic.offset == 0.5
 
 
-def test_blender_link_auto_inertia_sphere():
+def test_blender_link_auto_inertia_sphere() -> None:
     """Verify auto-calculation of inertia from sphere geometry."""
     bpy.ops.object.empty_add()
     link_obj = bpy.context.active_object
@@ -1010,7 +1020,7 @@ def test_blender_link_auto_inertia_sphere():
     assert pytest.approx(link.inertial.inertia.ixx) == 0.8
 
 
-def test_blender_ros2_control_defaults(clean_scene):
+def test_blender_ros2_control_defaults(clean_scene) -> None:
     """Verify default ROS2 control interface assignment when one side is selected."""
     props = bpy.context.scene.linkforge
     props.ros2_control_name = "DefaultBot"
@@ -1034,7 +1044,7 @@ def test_blender_ros2_control_defaults(clean_scene):
     assert control.joints[0].state_interfaces == ["position"]
 
 
-def test_blender_ros2_control_joint_obj_name_sync(clean_scene):
+def test_blender_ros2_control_joint_obj_name_sync(clean_scene) -> None:
     """Verify that ros2_control generation uses the joint_obj.linkforge_joint.joint_name instead of item.name if present."""
     props = bpy.context.scene.linkforge
     props.ros2_control_name = "SyncedBot"
@@ -1062,7 +1072,7 @@ def test_blender_ros2_control_joint_obj_name_sync(clean_scene):
     assert control.joints[0].name == "MyRealJoint"
 
 
-def test_blender_sensor_gps_and_lidar_full(clean_scene):
+def test_blender_sensor_gps_and_lidar_full(clean_scene) -> None:
     """Exhaustive test for GPS and LIDAR properties."""
     link = bpy.data.objects.new("L", None)
     bpy.context.collection.objects.link(link)
@@ -1093,7 +1103,7 @@ def test_blender_sensor_gps_and_lidar_full(clean_scene):
     assert core_lidar.lidar_info.vertical_samples == 16
 
 
-def test_blender_joint_dynamics(clean_scene):
+def test_blender_joint_dynamics(clean_scene) -> None:
     """Verify joint dynamics (damping, friction) conversion."""
     p = bpy.data.objects.new("P", None)
     c = bpy.data.objects.new("C", None)
@@ -1114,13 +1124,13 @@ def test_blender_joint_dynamics(clean_scene):
 
     from linkforge.blender.adapters.blender_to_core import blender_joint_to_core
 
-    core = blender_joint_to_core(j, bpy.context.scene)
+    core = blender_joint_to_core(j)
     assert core is not None
     assert pytest.approx(core.dynamics.damping) == 1.5
     assert pytest.approx(core.dynamics.friction) == 0.8
 
 
-def test_blender_link_inertial_origin(clean_scene):
+def test_blender_link_inertial_origin(clean_scene) -> None:
     """Verify inertial origin extraction."""
     obj = bpy.data.objects.new("Link", None)
     bpy.context.collection.objects.link(obj)
@@ -1134,7 +1144,7 @@ def test_blender_link_inertial_origin(clean_scene):
     assert pytest.approx(link.inertial.origin.rpy.z) == 0.5
 
 
-def test_blender_transmission_full(clean_scene):
+def test_blender_transmission_full(clean_scene) -> None:
     """Exhaustive test for Simple and Differential transmissions."""
     # Setup joints
     j1 = bpy.data.objects.new("J1", None)
@@ -1180,7 +1190,7 @@ def test_blender_transmission_full(clean_scene):
     assert core_diff.actuators[1].name == "act2"
 
 
-def test_scene_to_robot_with_gazebo_and_errors(clean_scene):
+def test_scene_to_robot_with_gazebo_and_errors(clean_scene) -> None:
     """Test scene_to_robot with Gazebo plugins and error collection."""
     props = bpy.context.scene.linkforge
     props.use_ros2_control = True
@@ -1208,9 +1218,11 @@ def test_scene_to_robot_with_gazebo_and_errors(clean_scene):
     with (
         mock.patch(
             "linkforge.blender.adapters.blender_to_core.blender_link_to_core_with_origin",
-            side_effect=Exception("Failed link"),
+            side_effect=RobotValidationError(ValidationErrorCode.INVALID_VALUE, "Failed link"),
         ),
-        pytest.raises(RobotModelError, match="The following configuration errors were found"),
+        pytest.raises(
+            RobotValidationError, match=r"\[INVALID_VALUE\] Multiple configuration errors found"
+        ),
     ):
         scene_to_robot(bpy.context)
 
@@ -1232,7 +1244,7 @@ def test_scene_to_robot_with_gazebo_and_errors(clean_scene):
         assert plugin.parameters["parameters"] == "/path/to/yaml"
 
 
-def test_blender_sensor_exhaustive(clean_scene):
+def test_blender_sensor_exhaustive(clean_scene) -> None:
     """Test all remaining sensor types and properties."""
     link = bpy.data.objects.new("L", None)
     bpy.context.collection.objects.link(link)
@@ -1277,7 +1289,7 @@ def test_blender_sensor_exhaustive(clean_scene):
     assert core_con.contact_info.collision == "some_link_geom"
 
 
-def test_blender_to_core_geometry_edge_cases(clean_scene):
+def test_blender_to_core_geometry_edge_cases(clean_scene) -> None:
     """Test geometry conversion edge cases (None, zero-size, fallbacks)."""
     from linkforge.blender.adapters.blender_to_core import (
         detect_primitive_type,
@@ -1306,7 +1318,7 @@ def test_blender_to_core_geometry_edge_cases(clean_scene):
     assert extract_mesh_triangles(empty) is None
 
 
-def test_blender_joint_advanced_cases(clean_scene):
+def test_blender_joint_advanced_cases(clean_scene) -> None:
     """Test custom axis, missing links, fixed axis, and continuous limits."""
     p = bpy.data.objects.new("P", None)
     c = bpy.data.objects.new("C", None)
@@ -1329,12 +1341,12 @@ def test_blender_joint_advanced_cases(clean_scene):
     j.linkforge_joint.custom_axis_x = 2.0
     j.linkforge_joint.custom_axis_y = 0.0
     j.linkforge_joint.custom_axis_z = 0.0
-    core = blender_joint_to_core(j, bpy.context.scene)
+    core = blender_joint_to_core(j)
     assert core.axis.x == 1.0  # Normalized
 
     # Zero axis fallback
     j.linkforge_joint.custom_axis_x = 0.0
-    core = blender_joint_to_core(j, bpy.context.scene)
+    core = blender_joint_to_core(j)
     assert core.axis.z == 1.0  # Fallback
 
     # 1. Safety Controller
@@ -1343,7 +1355,7 @@ def test_blender_joint_advanced_cases(clean_scene):
     j.linkforge_joint.safety_soft_upper_limit = 1.23
     j.linkforge_joint.safety_k_position = 100.0
     j.linkforge_joint.safety_k_velocity = 10.0
-    core = blender_joint_to_core(j, bpy.context.scene)
+    core = blender_joint_to_core(j)
     assert core.safety_controller is not None
     assert pytest.approx(core.safety_controller.soft_lower_limit) == -1.23
     assert pytest.approx(core.safety_controller.k_position) == 100.0
@@ -1353,30 +1365,30 @@ def test_blender_joint_advanced_cases(clean_scene):
     j.linkforge_joint.use_calibration_rising = True
     j.linkforge_joint.calibration_rising = 0.55
     j.linkforge_joint.use_calibration_falling = False
-    core = blender_joint_to_core(j, bpy.context.scene)
+    core = blender_joint_to_core(j)
     assert core.calibration is not None
     assert pytest.approx(core.calibration.rising) == 0.55
     assert core.calibration.falling is None
 
     # Fixed joint axis (should be None)
     j.linkforge_joint.joint_type = "FIXED"
-    core = blender_joint_to_core(j, bpy.context.scene)
+    core = blender_joint_to_core(j)
     assert core.axis is None
 
     # Continuous joint with limits
     j.linkforge_joint.joint_type = "CONTINUOUS"
     j.linkforge_joint.use_limits = True
     j.linkforge_joint.limit_effort = 10.0
-    core = blender_joint_to_core(j, bpy.context.scene)
+    core = blender_joint_to_core(j)
     assert core.limits.effort == 10.0
 
     # Missing parent error
     j.linkforge_joint.parent_link = None
-    with pytest.raises(RobotModelError, match="no parent link"):
-        blender_joint_to_core(j, bpy.context.scene)
+    with pytest.raises(RobotValidationError, match=r"\[NOT_FOUND\] Joint has no parent link"):
+        blender_joint_to_core(j)
 
 
-def test_blender_transmission_advanced(clean_scene):
+def test_blender_transmission_advanced(clean_scene) -> None:
     """Test custom transmission types and actuator names."""
     j1 = bpy.data.objects.new("J1", None)
     bpy.context.collection.objects.link(j1)
@@ -1398,7 +1410,7 @@ def test_blender_transmission_advanced(clean_scene):
     assert core.actuators[0].name == "custom_motor"
 
 
-def test_blender_link_mesh_inertia(clean_scene):
+def test_blender_link_mesh_inertia(clean_scene) -> None:
     """Test inertia calculation from real mesh data.
     Must force MESH geometry type to hit the mesh inertia branch.
     """
@@ -1433,7 +1445,7 @@ def test_blender_link_mesh_inertia(clean_scene):
     assert core.inertial.inertia.ixx > 0
 
 
-def test_scene_to_robot_full_integration(clean_scene):
+def test_scene_to_robot_full_integration(clean_scene) -> None:
     """Exhaustive test for scene_to_robot with sensors, plugins, and multi-visuals."""
     from pathlib import Path
 
@@ -1528,7 +1540,7 @@ def test_scene_to_robot_full_integration(clean_scene):
     assert len(robot.gazebo_elements) > 0
 
 
-def test_blender_to_core_edge_cases(clean_scene):
+def test_blender_to_core_edge_cases(clean_scene) -> None:
     """Hit absolute remaining gaps (name sanitization, empty loops, unknown types)."""
     from linkforge.blender.adapters.blender_to_core import (
         _calculate_link_frames,
@@ -1579,7 +1591,7 @@ def test_blender_to_core_edge_cases(clean_scene):
     assert len(core.visuals) == 2
 
 
-def test_blender_to_core_small_gaps(clean_scene):
+def test_blender_to_core_small_gaps(clean_scene) -> None:
     """Hit remaining tiny gaps like material fallback and no-geometry link."""
     from pathlib import Path
     from unittest.mock import MagicMock
@@ -1650,7 +1662,7 @@ def test_blender_to_core_small_gaps(clean_scene):
     assert any(ln.name == "gaps_root" for ln in robot.links)
 
 
-def test_blender_to_core_missing_errors(clean_scene):
+def test_blender_to_core_missing_errors(clean_scene) -> None:
     """Hit missing child link, empty transmission, simplify, and None returns."""
     from unittest.mock import MagicMock
 
@@ -1662,16 +1674,15 @@ def test_blender_to_core_missing_errors(clean_scene):
         blender_transmission_to_core,
         get_object_geometry,
     )
-    from linkforge.linkforge_core.exceptions import RobotModelError
-    from linkforge.linkforge_core.models.geometry import Box
+    from linkforge_core.models.geometry import Box
 
     # blender_link_to_core_with_origin None
     assert blender_link_to_core_with_origin(None) is None
 
     # blender_joint_to_core None/non-robot
-    assert blender_joint_to_core(None, bpy.context.scene) is None
+    assert blender_joint_to_core(None) is None
     empty = bpy.data.objects.new("EmptyNone", None)
-    assert blender_joint_to_core(empty, bpy.context.scene) is None
+    assert blender_joint_to_core(empty) is None
 
     # blender_sensor_to_core None/non-robot
     assert blender_sensor_to_core(None) is None
@@ -1725,8 +1736,8 @@ def test_blender_to_core_missing_errors(clean_scene):
     j.linkforge_joint.is_robot_joint = True
     j.linkforge_joint.parent_link = p_link
     j.linkforge_joint.child_link = None
-    with pytest.raises(RobotModelError, match="no child link"):
-        blender_joint_to_core(j, bpy.context.scene)
+    with pytest.raises(RobotValidationError, match=r"\[NOT_FOUND\] Joint has no child link"):
+        blender_joint_to_core(j)
 
     # Empty transmission
     t = bpy.data.objects.new("T", None)
@@ -1739,11 +1750,11 @@ def test_blender_to_core_missing_errors(clean_scene):
     j.linkforge_joint.child_link = c_link
     j.linkforge_joint.use_mimic = True
     j.linkforge_joint.mimic_joint = mimic_target
-    core = blender_joint_to_core(j, bpy.context.scene)
+    core = blender_joint_to_core(j)
     assert core.mimic.joint == "MimicTarget"
 
 
-def test_detect_primitive_type_tags():
+def test_detect_primitive_type_tags() -> None:
     """Verify manual primitive type override via custom properties."""
     bpy.ops.mesh.primitive_cube_add()
     obj = bpy.context.active_object

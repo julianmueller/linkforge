@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import contextlib
-import re
 import typing
 from pathlib import Path
 
 import bpy
-from mathutils import Matrix
-
-from ...linkforge_core.logging_config import get_logger
-from ...linkforge_core.models import (
+from linkforge_core.logging_config import get_logger
+from linkforge_core.models import (
     Box,
     Color,
     Cylinder,
@@ -21,54 +18,14 @@ from ...linkforge_core.models import (
     Robot,
     Sphere,
 )
-from ...linkforge_core.utils.kinematics import sort_joints_topological
-from ...linkforge_core.utils.path_utils import resolve_package_path
-from ..preferences import get_addon_prefs
-from ..utils.joint_utils import resolve_mimic_joints
-from ..utils.scene_utils import move_to_collection
+from linkforge_core.utils.kinematics import sort_joints_topological
+from mathutils import Matrix
+
+from linkforge.blender.preferences import get_addon_prefs
+from linkforge.blender.utils.joint_utils import resolve_mimic_joints
+from linkforge.blender.utils.scene_utils import move_to_collection, sync_object_collections
 
 logger = get_logger(__name__)
-
-
-def resolve_mesh_path(filepath: Path, urdf_dir: Path) -> Path:
-    """Resolve mesh path relative to URDF directory, as package:// URI, or absolute.
-
-    Args:
-        filepath: Original mesh filepath from URDF
-        urdf_dir: Directory containing the URDF file
-
-    Returns:
-        Resolved Path object
-    """
-    path_str = str(filepath)
-
-    # Handle file:// URIs
-    if path_str.startswith("file://") or path_str.startswith("file:/"):
-        # Handle file:/// (standard), file:// (non-standard but common),
-        # and file:/ (Blender's Path representation in some cases)
-        # Replace "file:" followed by any number of slashes with a single slash
-        path_str = re.sub(r"^file:/*", "/", path_str)
-
-        # On Windows, a path like "/C:/path" needs to become "C:/path"
-        if path_str.startswith("/") and len(path_str) > 2 and path_str[2] == ":":
-            path_str = path_str.lstrip("/")
-        return Path(path_str)
-
-    # Handle package:// URIs
-    if "package:" in path_str:
-        resolved = resolve_package_path(path_str, urdf_dir)
-        if resolved and resolved.exists():
-            return resolved
-        logger.warning(f"Failed to resolve package URI: {path_str}")
-        # Fallback to stripping prefix and trying relative
-        path_str = path_str.replace("package://", "").replace("package:/", "")
-        filepath = Path(path_str)
-
-    mesh_path = urdf_dir / filepath
-    if not mesh_path.exists():
-        # Try as absolute path
-        return Path(filepath)
-    return mesh_path
 
 
 def create_material_from_color(color: Color, name: str) -> bpy.types.Material | None:
@@ -112,7 +69,7 @@ def create_material_from_color(color: Color, name: str) -> bpy.types.Material | 
     return mat
 
 
-def create_primitive_mesh(geometry: typing.Any, name: str) -> bpy.types.Object | None:
+def create_primitive_mesh(geometry: Box | Cylinder | Sphere, name: str) -> bpy.types.Object | None:
     """Create a Blender mesh object from primitive geometry.
 
     This function generates native Blender mesh primitives (Cube, Cylinder,
@@ -344,7 +301,7 @@ def normalize_and_consolidate_imported_objects(
                 bpy.data.objects.remove(obj, do_unlink=True)
         return None
 
-    # Step 2: Prepare for join
+    # Prepare for join
     mesh_list = list(mesh_objs)
     bpy.ops.object.select_all(action="DESELECT")
     for obj in mesh_list:
@@ -357,12 +314,12 @@ def normalize_and_consolidate_imported_objects(
     # Bake axis/scale
     bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
 
-    # Step 3: Join
+    # Join
     final_obj = mesh_list[0]
     if len(mesh_list) > 1:
         bpy.ops.object.join()
 
-    # Step 4: Final cleanup
+    # Final cleanup
     final_obj.name = name
     final_obj.rotation_mode = "XYZ"
     final_obj.location = (0, 0, 0)
@@ -379,7 +336,7 @@ def normalize_and_consolidate_imported_objects(
     return final_obj
 
 
-def _get_geometry_type_str(geometry: typing.Any) -> str:
+def _get_geometry_type_str(geometry: Box | Cylinder | Sphere | Mesh) -> str:
     """Get geometry type string from geometry instance."""
     geometry_type_map = {
         Box: "BOX",
@@ -394,13 +351,17 @@ def _get_geometry_type_str(geometry: typing.Any) -> str:
 
 
 def create_link_object(
-    link: Link, urdf_dir: Path, collection: bpy.types.Collection | None = None
+    link: Link,
+    robot: Robot,
+    urdf_dir: Path,
+    collection: bpy.types.Collection | None = None,
 ) -> bpy.types.Object | None:
     """Create Blender object from Link model with support for multiple visual/collision elements.
 
     Args:
         link: Link model
-        urdf_dir: Directory containing URDF file (for resolving mesh paths)
+        robot: Robot model (for resolving resources)
+        urdf_dir: Directory containing URDF file (for resolving relative paths)
         collection: Blender Collection to add object to
 
     Returns:
@@ -426,6 +387,7 @@ def create_link_object(
     if hasattr(link_obj, "linkforge"):
         props = link_obj.linkforge
         props.is_robot_link = True
+        props.urdf_name_stored = link.name
         props.link_name = link.name
 
     # Create all visual geometries (URDF allows multiple <visual> per link)
@@ -442,9 +404,13 @@ def create_link_object(
 
         # Create geometry
         if isinstance(visual.geometry, Mesh):
-            # Resolve mesh path
-            mesh_path = resolve_mesh_path(visual.geometry.filepath, urdf_dir)
-            visual_obj = import_mesh_file(mesh_path, visual_name)
+            # Resolve mesh path using unified Robot resolver
+            try:
+                mesh_path = robot.resolve_resource(visual.geometry.resource, relative_to=urdf_dir)
+                visual_obj = import_mesh_file(mesh_path, visual_name)
+            except FileNotFoundError as e:
+                logger.warning(f"Mesh not found for visual '{visual_name}': {e}")
+                visual_obj = None
 
             # Apply scale from URDF
             if visual_obj and visual.geometry.scale:
@@ -504,9 +470,15 @@ def create_link_object(
 
         # Create geometry
         if isinstance(collision.geometry, Mesh):
-            # Resolve mesh path
-            mesh_path = resolve_mesh_path(collision.geometry.filepath, urdf_dir)
-            collision_obj = import_mesh_file(mesh_path, collision_name)
+            # Resolve mesh path using unified Robot resolver
+            try:
+                mesh_path = robot.resolve_resource(
+                    collision.geometry.resource, relative_to=urdf_dir
+                )
+                collision_obj = import_mesh_file(mesh_path, collision_name)
+            except FileNotFoundError as e:
+                logger.warning(f"Mesh not found for collision '{collision_name}': {e}")
+                collision_obj = None
 
             # Apply scale from URDF
             if collision_obj and collision.geometry.scale:
@@ -543,9 +515,8 @@ def create_link_object(
             # Without this, collision meshes degrade with each import-export cycle.
             collision_obj["imported_from_urdf"] = True
 
-            # Add collision mesh to collection
-            if collection:
-                move_to_collection(collision_obj, collection)
+            # Add collision mesh to link's collections
+            sync_object_collections(collision_obj, link_obj)
 
             # Clear materials from collision mesh (collision doesn't need materials)
             # Materials may come from imported mesh files (OBJ, DAE, etc.)
@@ -654,9 +625,13 @@ def create_joint_object(
     empty.rotation_mode = "XYZ"
     empty.location = (0, 0, 0)
 
-    # Add to collection
+    # Add to collection (hierarchy-aware)
     if collection:
-        collection.objects.link(empty)
+        if isinstance(collection, bpy.types.Collection):
+            collection.objects.link(empty)
+        else:
+            # It's an object, sync to its collections
+            sync_object_collections(empty, collection)
     elif bpy.context.scene and bpy.context.scene.collection:
         bpy.context.scene.collection.objects.link(empty)
 
@@ -664,6 +639,7 @@ def create_joint_object(
     if hasattr(empty, "linkforge_joint"):
         props = empty.linkforge_joint
         props.is_robot_joint = True
+        props.urdf_name_stored = joint.name
         props.joint_name = joint.name
 
         # Set joint type
@@ -946,7 +922,7 @@ def setup_scene_for_robot(scene: bpy.types.Scene, robot: Robot) -> None:
     # Since LinkForge manages a single centralized configuration per scene,
     # Populate centralized ROS2 Control
     if robot.ros2_controls:
-        lp = scene.linkforge  # type: ignore[attr-defined]
+        lp = getattr(scene, "linkforge")
         lp.use_ros2_control = True
         control = robot.ros2_controls[0]
         lp.ros2_control_name = control.name
@@ -1038,7 +1014,7 @@ def import_robot_to_scene(robot: Robot, urdf_path: Path, context: bpy.types.Cont
     logger.info(f"Importing robot '{robot.name}' ({', '.join(parts)})")
 
     for link in robot.links:
-        obj = create_link_object(link, urdf_dir, collection)
+        obj = create_link_object(link, robot, urdf_dir, collection)
         if obj:
             link_objects[link.name] = obj
 

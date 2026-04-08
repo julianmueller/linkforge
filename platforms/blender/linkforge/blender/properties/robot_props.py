@@ -22,6 +22,26 @@ from bpy.types import PropertyGroup
 from .control_props import Ros2ControlJointProperty, Ros2ControlParameterProperty
 
 
+def update_collision_visibility(self: RobotPropertyGroup, context: bpy.types.Context) -> None:
+    """Update visibility of all collision meshes in the scene."""
+    if not context or not context.scene:
+        return
+
+    show = self.show_collisions
+    scene = context.scene
+
+    for obj in scene.objects:
+        # Check if object is a collision mesh
+        # Criteria: Parent is a robot link AND name contains "_collision"
+        if (
+            obj.parent
+            and hasattr(obj.parent, "linkforge")
+            and obj.parent.linkforge.is_robot_link
+            and "_collision" in obj.name.lower()
+        ):
+            obj.hide_viewport = not show
+
+
 class RobotPropertyGroup(PropertyGroup):
     """Global robot properties stored on the Scene."""
 
@@ -217,26 +237,6 @@ class RobotPropertyGroup(PropertyGroup):
     )
 
 
-def update_collision_visibility(self: RobotPropertyGroup, context: bpy.types.Context) -> None:
-    """Update visibility of all collision meshes in the scene."""
-    if not context or not context.scene:
-        return
-
-    show = self.show_collisions
-    scene = context.scene
-
-    for obj in scene.objects:
-        # Check if object is a collision mesh
-        # Criteria: Parent is a robot link AND name contains "_collision"
-        if (
-            obj.parent
-            and hasattr(obj.parent, "linkforge")
-            and obj.parent.linkforge.is_robot_link
-            and "_collision" in obj.name.lower()
-        ):
-            obj.hide_viewport = not show
-
-
 # Registration
 def register() -> None:
     """Register property group."""
@@ -247,19 +247,16 @@ def register() -> None:
         bpy.utils.unregister_class(RobotPropertyGroup)
         bpy.utils.register_class(RobotPropertyGroup)
 
-    import typing
-
-    typing.cast(typing.Any, bpy.types.Scene).linkforge = bpy.props.PointerProperty(
-        type=RobotPropertyGroup
-    )  # type: ignore[func-returns-value]
+    # Register scene property
+    prop = bpy.props.PointerProperty(type=RobotPropertyGroup)  # type: ignore[func-returns-value]
+    bpy.types.Scene.linkforge = prop  # type: ignore[attr-defined]
 
 
 def unregister() -> None:
     """Unregister property group."""
-    import typing
 
     with contextlib.suppress(AttributeError):
-        del typing.cast(typing.Any, bpy.types.Scene).linkforge
+        delattr(bpy.types.Scene, "linkforge")
 
     with contextlib.suppress(RuntimeError):
         bpy.utils.unregister_class(RobotPropertyGroup)

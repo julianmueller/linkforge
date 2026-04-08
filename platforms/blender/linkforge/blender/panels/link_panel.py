@@ -8,7 +8,7 @@ import typing
 import bpy
 from bpy.types import Context, Panel
 
-from ..adapters.blender_to_core import detect_primitive_type
+from ..utils.scene_utils import get_robot_statistics
 
 
 class LINKFORGE_PT_links(Panel):
@@ -45,7 +45,7 @@ class LINKFORGE_PT_links(Panel):
             )
             return
 
-        props = typing.cast(typing.Any, obj).linkforge
+        props = getattr(obj, "linkforge")
 
         # Check if selected object is a visual/collision child of a link
         # If so, show parent link properties instead
@@ -53,14 +53,14 @@ class LINKFORGE_PT_links(Panel):
             obj
             and obj.parent
             and hasattr(obj.parent, "linkforge")
-            and typing.cast(typing.Any, obj.parent).linkforge.is_robot_link
+            and getattr(obj.parent, "linkforge").is_robot_link
             and props
             and not props.is_robot_link
             and ("_visual" in obj.name.lower() or "_collision" in obj.name.lower())
         ):
             # Switch to parent for property display (visual/collision elements only)
             obj = obj.parent
-            props = typing.cast(typing.Any, obj).linkforge
+            props = getattr(obj, "linkforge")
 
         # Check if selected object is already a link (edit mode vs create mode)
         is_link = props.is_robot_link if props else False
@@ -85,9 +85,15 @@ class LINKFORGE_PT_links(Panel):
         collision_count = sum(1 for child in obj.children if "_collision" in child.name.lower())
         is_virtual = visual_count == 0 and collision_count == 0
 
-        title = f"Link: {obj.name}"
+        title = f"Link: {props.link_name}"
         icon = "EMPTY_DATA" if is_virtual else "LINKED"
-        box.label(text=title, icon=icon)  # type: ignore[arg-type]
+        box.label(text=title, icon=typing.cast(typing.Any, icon))
+
+        # Display Blender object name if it differs from persistent URDF name
+        if obj.name != props.link_name:
+            sub = box.row()
+            sub.active = False  # Make it subtle
+            sub.label(text=f"Blender Obj: {obj.name}", icon="INFO")
 
         if is_virtual:
             status_box = box.box()
@@ -110,52 +116,33 @@ class LINKFORGE_PT_links(Panel):
         row.enabled = not is_virtual
         row.prop(props, "collision_type", text="Collision Type")
 
-        # Geometry Detection Info
-        detected_type = None
+        # Geometry Detection Info (Uses centralized statistics for performance)
+        stats = get_robot_statistics(context.scene)
+        geo_info = stats.geometry_stats.get(props.link_name)
+
+        collision_obj = None
+        detected_type = "MESH"
         is_primitive = False
-        collision_obj = next((c for c in obj.children if "_collision" in c.name.lower()), None)
 
-        if collision_obj:
-            # 1. Check explicit URDF tag (Strongest guarantee)
-            if collision_obj.get("urdf_geometry_type"):  # type: ignore[func-returns-value]
-                detected_type = collision_obj["urdf_geometry_type"]
-                is_primitive = detected_type in ("BOX", "CYLINDER", "SPHERE")
+        if geo_info:
+            collision_obj, detected_type, is_primitive = geo_info
 
-            # 2. Check generator tag (from generate_collision operator)
-            stored_type = typing.cast(str, collision_obj.get("collision_geometry_type", "AUTO"))
-            if stored_type and stored_type in ("BOX", "CYLINDER", "SPHERE"):
-                detected_type = stored_type
-                is_primitive = True
-            elif stored_type == "MESH":
-                detected_type = "MESH"
-                is_primitive = False
-            # 3. Fallback to heuristic detection
-            elif detect_primitive_type:  # type: ignore[truthy-function]
-                try:
-                    heuristic_type = detect_primitive_type(collision_obj)
-                    detected_type = heuristic_type if heuristic_type else "MESH"
-                    is_primitive = heuristic_type is not None
-                except Exception:
-                    detected_type = "MESH"
-            else:
-                detected_type = "MESH"
-
-        # Display detected type
         # Display detected type - ONLY if collision exists
         if collision_obj:
             row = box.row()
-            icon = "INFO"
-            icon = "MESH_ICOSPHERE" if is_primitive else "OUTLINER_DATA_MESH"
-        if collision_obj:
-            row = box.row()
-            icon = "INFO"
             icon_name = "MESH_ICOSPHERE" if is_primitive else "OUTLINER_DATA_MESH"
-            row.label(text=f"Detected Collision: {detected_type}", icon=icon_name)  # type: ignore[arg-type]
+            row.label(
+                text=f"Detected Collision: {detected_type}", icon=typing.cast(typing.Any, icon_name)
+            )
 
             is_imported = typing.cast(bool, collision_obj.get("imported_from_urdf"))
 
-            # Show slider for meshes (only relevant for non-primitives)
-            if detected_type == "MESH":
+            # Show quality slider for mesh-based collisions.
+            # If the user explicitly selects MESH mode, we show the slider even if
+            # the current detection is a primitive to allow for mode switching.
+            if props.collision_type == "MESH" or (
+                props.collision_type == "AUTO" and detected_type == "MESH"
+            ):
                 box.separator()
                 row = box.row()
                 # Disable slider if imported from URDF (cannot be simplified via slider)
@@ -170,12 +157,16 @@ class LINKFORGE_PT_links(Panel):
 
         if collision_count == 0:
             # No collision - offer to generate
-            col.operator(
+            row = col.row()
+            row.enabled = visual_count > 0
+            row.operator(
                 "linkforge.generate_collision", icon="MOD_PHYSICS", text="Generate Collision"
             )
         else:
             # Has collision - offer regenerate AND visibility toggle
-            col.operator(
+            row = col.row()
+            row.enabled = visual_count > 0
+            row.operator(
                 "linkforge.generate_collision", icon="FILE_REFRESH", text="Regenerate Collision"
             )
 
@@ -187,7 +178,11 @@ class LINKFORGE_PT_links(Panel):
                 is_hidden = collision_obj.hide_viewport
                 icon_name = "HIDE_OFF" if is_hidden else "HIDE_ON"
                 text = "Show Collision" if is_hidden else "Hide Collision"
-                col.operator("linkforge.toggle_collision_visibility", icon=icon_name, text=text)  # type: ignore
+                col.operator(
+                    "linkforge.toggle_collision_visibility",
+                    icon=typing.cast(typing.Any, icon_name),
+                    text=text,
+                )
 
         # Physics properties
         box.separator()
@@ -225,12 +220,12 @@ class LINKFORGE_PT_links(Panel):
             inertia_box.separator()
             inertia_box.label(text="Center of Mass")
 
-            # Position (XYZ)
+            # Position (XYZ)  # noqa: ERA001
             row = inertia_box.row(align=True)
             row.label(text="Position:", icon="EMPTY_AXIS")
             row.prop(props, "inertia_origin_xyz", text="")
 
-            # Rotation (RPY)
+            # Rotation (RPY)  # noqa: ERA001
             row = inertia_box.row(align=True)
             row.label(text="Rotation:", icon="ORIENTATION_GIMBAL")
             row.prop(props, "inertia_origin_rpy", text="")

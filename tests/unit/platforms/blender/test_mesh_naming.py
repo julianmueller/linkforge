@@ -4,7 +4,7 @@ import bpy
 from linkforge.blender.adapters.blender_to_core import blender_link_to_core_with_origin
 
 
-def test_single_visual_no_suffix():
+def test_single_visual_no_suffix() -> None:
     """Test that a single visual mesh has no suffix."""
     # Setup link and one visual child
     bpy.ops.object.select_all(action="DESELECT")
@@ -27,12 +27,12 @@ def test_single_visual_no_suffix():
 
     # Assert
     assert len(core_link.visuals) == 1
-    # The Mesh geometry should have a filepath "test_link_visual.stl" (no _0)
-    assert hasattr(core_link.visuals[0].geometry, "filepath")
-    assert core_link.visuals[0].geometry.filepath.name == "test_link_visual.stl"
+    # The Mesh geometry should have a resource "test_link_visual.stl" (no _0)
+    assert hasattr(core_link.visuals[0].geometry, "resource")
+    assert Path(core_link.visuals[0].geometry.resource).name == "test_link_visual.stl"
 
 
-def test_multiple_visuals_with_suffix():
+def test_multiple_visuals_with_suffix() -> None:
     """Test that multiple visual meshes have suffixes."""
     # Setup link and two visual children
     bpy.ops.object.select_all(action="DESELECT")
@@ -61,12 +61,12 @@ def test_multiple_visuals_with_suffix():
     # Assert
     assert len(core_link.visuals) == 2
     # Filenames should be "multi_link_visual_0.stl" and "multi_link_visual_1.stl"
-    filenames = [v.geometry.filepath.name for v in core_link.visuals]
+    filenames = [Path(v.geometry.resource).name for v in core_link.visuals]
     assert "multi_link_visual_0.stl" in filenames
     assert "multi_link_visual_1.stl" in filenames
 
 
-def test_urdf_name_preservation():
+def test_urdf_name_preservation() -> None:
     """Test that urdf_name is preserved even for single meshes."""
     bpy.ops.object.select_all(action="DESELECT")
     bpy.ops.object.empty_add()
@@ -90,5 +90,5 @@ def test_urdf_name_preservation():
     # Assert
     assert len(core_link.visuals) == 1
     # Filename should be "name_link_visual_custom_part.stl"
-    assert hasattr(core_link.visuals[0].geometry, "filepath")
-    assert core_link.visuals[0].geometry.filepath.name == "name_link_visual_custom_part.stl"
+    assert hasattr(core_link.visuals[0].geometry, "resource")
+    assert Path(core_link.visuals[0].geometry.resource).name == "name_link_visual_custom_part.stl"

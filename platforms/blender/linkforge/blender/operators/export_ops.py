@@ -14,9 +14,13 @@ from pathlib import Path
 import bpy
 from bpy.types import Context, Event, Operator
 from bpy_extras.io_utils import ExportHelper
+from linkforge_core.logging_config import get_logger
 
-from ...linkforge_core.logging_config import get_logger
-from ..utils.decorators import safe_execute
+from ..utils.decorators import OperatorReturn, safe_execute
+
+if typing.TYPE_CHECKING:
+    from ..properties.robot_props import RobotPropertyGroup
+    from ..properties.validation_props import ValidationResultProperty
 
 logger = get_logger(__name__)
 
@@ -49,7 +53,7 @@ class LINKFORGE_OT_export_urdf(Operator, ExportHelper):
     )
 
     # Type ignore to resolve 'misc' definition collision with Operator.check
-    def check(self, context: Context) -> bool:  # type: ignore
+    def check(self, context: Context) -> typing.Any:
         """Verify if export can proceed based on current scene state."""
         return bool(context.scene and hasattr(context.scene, "linkforge"))
 
@@ -70,16 +74,17 @@ class LINKFORGE_OT_export_urdf(Operator, ExportHelper):
         return ExportHelper.invoke(self, context, event)
 
     @safe_execute
-    def execute(self, context: Context) -> set[str]:
+    def execute(self, context: Context) -> OperatorReturn:
         """Execute the export."""
         # Import here to avoid circular dependencies
-        from ...linkforge_core import URDFGenerator, XACROGenerator
+        from linkforge_core import URDFGenerator, XACROGenerator
+
         from ..adapters.blender_to_core import scene_to_robot
 
         if not context.scene or not hasattr(context.scene, "linkforge"):
             return {"CANCELLED"}
         scene = context.scene
-        robot_props = typing.cast(typing.Any, scene).linkforge
+        robot_props = typing.cast("RobotPropertyGroup", getattr(scene, "linkforge"))
 
         # Prepare meshes directory if exporting meshes
         output_path = Path(self.filepath)
@@ -99,7 +104,7 @@ class LINKFORGE_OT_export_urdf(Operator, ExportHelper):
         logger.info(f"Exporting robot to: {output_path}")
         logger.debug(f"Mesh directory: {meshes_dir}")
 
-        from ...linkforge_core import LinkForgeError, RobotGeneratorError
+        from linkforge_core import LinkForgeError, RobotGeneratorError
 
         # Validate if requested
         if robot_props.validate_before_export:
@@ -114,10 +119,10 @@ class LINKFORGE_OT_export_urdf(Operator, ExportHelper):
                 logger.exception("Dry run build crashed")
                 return {"CANCELLED"}
 
-            from ...linkforge_core.validation import RobotValidator
+            from linkforge_core.validation import RobotValidator
 
-            validator = RobotValidator(robot_dry_run)
-            result = validator.validate()
+            validator = RobotValidator()
+            result = validator.validate(robot_dry_run)
 
             if not result.is_valid:
                 self.report(
@@ -188,9 +193,10 @@ class LINKFORGE_OT_validate_robot(Operator):
     bl_description = "Validate the robot structure for errors"
 
     @safe_execute
-    def execute(self, context: Context) -> set[str]:
+    def execute(self, context: Context) -> OperatorReturn:
         """Execute validation."""
-        from ...linkforge_core.validation import RobotValidator
+        from linkforge_core.validation import RobotValidator
+
         from ..adapters.blender_to_core import scene_to_robot
 
         # Clear previous results
@@ -200,7 +206,9 @@ class LINKFORGE_OT_validate_robot(Operator):
             self.report({"ERROR"}, "Validation system not initialized")
             return {"CANCELLED"}
 
-        validation_props = typing.cast(typing.Any, context.window_manager).linkforge_validation
+        validation_props = typing.cast(
+            "ValidationResultProperty", getattr(context.window_manager, "linkforge_validation")
+        )
         validation_props.clear()
 
         # Convert scene to robot
@@ -247,8 +255,8 @@ class LINKFORGE_OT_validate_robot(Operator):
             return {"FINISHED"}
 
         # Validate using new validator
-        validator = RobotValidator(robot)
-        result = validator.validate()
+        validator = RobotValidator()
+        result = validator.validate(robot)
 
         # Store results in window manager
         validation_props.has_results = True

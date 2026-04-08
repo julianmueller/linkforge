@@ -11,10 +11,10 @@ import typing
 from pathlib import Path
 
 import bpy
+from linkforge_core.logging_config import get_logger
+from linkforge_core.models import Robot
+from linkforge_core.utils.kinematics import sort_joints_topological
 
-from ...linkforge_core.logging_config import get_logger
-from ...linkforge_core.models import Robot
-from ...linkforge_core.utils.kinematics import sort_joints_topological
 from ..adapters.core_to_blender import (
     create_joint_object,
     create_link_object,
@@ -171,7 +171,7 @@ class AsynchronousRobotBuilder:
                 self.context.scene.collection.children.link(self.collection)
 
         elif task_type == "create_link":
-            obj = create_link_object(data, self.urdf_path.parent, self.collection)
+            obj = create_link_object(data, self.robot, self.urdf_path.parent, self.collection)
             if obj:
                 self.link_objects[data.name] = obj
 
@@ -181,7 +181,7 @@ class AsynchronousRobotBuilder:
                 self.joint_objects[data.name] = obj
 
         elif task_type == "resolve_mimics":
-            # Convert tuple to list for MyPy compatibility
+            # Convert to list for type-safety with mimic resolver
             joints_list = list(self.robot.joints)
             resolve_mimic_joints(joints_list, self.joint_objects)
 
@@ -197,6 +197,19 @@ class AsynchronousRobotBuilder:
             if scene and hasattr(scene, "linkforge"):
                 # Force update collision visibility toggle
                 scene.linkforge.show_collisions = scene.linkforge.show_collisions
+
+                # Auto-link ROS 2 Control joint pointers to newly created objects
+                # Match by persistent URDF identity (urdf_name_stored)
+                lp = scene.linkforge
+                if lp.use_ros2_control:
+                    for rc_joint in lp.ros2_control_joints:
+                        # Find the joint object in the current import set
+                        target_obj = self.joint_objects.get(rc_joint.name)
+                        if target_obj:
+                            rc_joint.joint_obj = target_obj
+                            logger.debug(
+                                f"Auto-linked ROS2 Control joint '{rc_joint.name}' to {target_obj.name}"
+                            )
 
     def finish(self) -> None:
         """Clean up and finalize."""

@@ -6,31 +6,30 @@ from linkforge.blender.operators.import_ops import (
     register,
     unregister,
 )
-from linkforge.linkforge_core.exceptions import RobotModelError
+from linkforge_core.exceptions import RobotModelError
 
 
-def test_import_urdf_logic_paths(mocker, tmp_path):
+def test_import_urdf_logic_paths(tmp_path) -> None:
     """Test import operator logic by calling the unbound method."""
     mock_self = MagicMock(spec=LINKFORGE_OT_import_urdf)
     mock_self.report = MagicMock()
 
     urdf_file = tmp_path / "test.urdf"
-    urdf_file.write_text("<robot name='test'/>")
+    urdf_file.write_text("<robot name='test'><link name='base_link'/></robot>")
     mock_self.filepath = str(urdf_file)
 
     context = MagicMock()
     # Mock the asynchronous builder to avoid side effects during logic verification.
-    mocker.patch("linkforge.blender.logic.asynchronous_builder.AsynchronousRobotBuilder")
-    mocker.patch(
-        "linkforge.linkforge_core.validation.security.find_sandbox_root", return_value=tmp_path
-    )
+    with (
+        patch("linkforge.blender.logic.asynchronous_builder.AsynchronousRobotBuilder"),
+        patch("linkforge_core.validation.security.find_sandbox_root", return_value=tmp_path),
+    ):
+        # Call execute directly to test the logic
+        result = LINKFORGE_OT_import_urdf.execute(mock_self, context)
+        assert result == {"FINISHED"}
 
-    # Call execute directly to test the logic
-    result = LINKFORGE_OT_import_urdf.execute(mock_self, context)
-    assert result == {"FINISHED"}
 
-
-def test_import_invalid_path_logic(mocker):
+def test_import_invalid_path_logic() -> None:
     """Test handling of invalid paths or missing directories."""
     mock_self = MagicMock(spec=LINKFORGE_OT_import_urdf)
     mock_self.filepath = "/non/existent/path.urdf"
@@ -40,10 +39,12 @@ def test_import_invalid_path_logic(mocker):
     # Case 1: File not found
     result = LINKFORGE_OT_import_urdf.execute(mock_self, context)
     assert result == {"CANCELLED"}
-    mock_self.report.assert_called_with({"ERROR"}, mocker.ANY)
+    from unittest.mock import ANY
+
+    mock_self.report.assert_called_with({"ERROR"}, ANY)
 
 
-def test_import_urdf_xacro_fallback(mocker, tmp_path):
+def test_import_urdf_xacro_fallback(tmp_path) -> None:
     """Test switching to Xacro parser if Xacro content is detected."""
     mock_self = MagicMock(spec=LINKFORGE_OT_import_urdf)
     mock_self.report = MagicMock()
@@ -53,30 +54,29 @@ def test_import_urdf_xacro_fallback(mocker, tmp_path):
     mock_self.filepath = str(urdf_file)
 
     context = MagicMock()
-    from linkforge.linkforge_core import XacroDetectedError
+    from linkforge_core import XacroDetectedError
 
-    mocker.patch(
-        "linkforge.linkforge_core.parsers.URDFParser.parse",
-        side_effect=XacroDetectedError("Xacro detected"),
-    )
-    mocker.patch(
-        "linkforge.linkforge_core.parsers.XacroResolver.resolve_file",
-        return_value="<robot name='resolved'/>",
-    )
-    mocker.patch(
-        "linkforge.linkforge_core.parsers.URDFParser.parse_string", return_value=MagicMock()
-    )
-    mocker.patch("linkforge.blender.logic.asynchronous_builder.AsynchronousRobotBuilder")
-    mocker.patch(
-        "linkforge.linkforge_core.validation.security.find_sandbox_root", return_value=tmp_path
-    )
+    with (
+        patch(
+            "linkforge_core.parsers.URDFParser.parse",
+            side_effect=XacroDetectedError("Xacro detected"),
+        ),
+        patch(
+            "linkforge_core.parsers.XacroResolver.resolve_file",
+            return_value="<robot name='resolved'/>",
+        ),
+        patch("linkforge_core.parsers.URDFParser.parse_string", return_value=MagicMock()),
+        patch("linkforge.blender.logic.asynchronous_builder.AsynchronousRobotBuilder"),
+        patch("linkforge_core.validation.security.find_sandbox_root", return_value=tmp_path),
+    ):
+        result = LINKFORGE_OT_import_urdf.execute(mock_self, context)
+        assert result == {"FINISHED"}
+        from unittest.mock import ANY
 
-    result = LINKFORGE_OT_import_urdf.execute(mock_self, context)
-    assert result == {"FINISHED"}
-    mock_self.report.assert_any_call({"WARNING"}, mocker.ANY)
+        mock_self.report.assert_any_call({"WARNING"}, ANY)
 
 
-def test_import_urdf_directory_handling_more(mocker, tmp_path):
+def test_import_urdf_directory_handling_more(tmp_path) -> None:
     """Test standard directory handling branches."""
     mock_self = MagicMock(spec=LINKFORGE_OT_import_urdf)
     mock_self.report = MagicMock()
@@ -86,21 +86,21 @@ def test_import_urdf_directory_handling_more(mocker, tmp_path):
 
     # Case 1: Exactly one valid file
     robot_file = subdir / "one.urdf"
-    robot_file.write_text("<robot name='one'/>")
+    robot_file.write_text("<robot name='one'><link name='base_link'/></robot>")
     mock_self.filepath = str(subdir)
 
-    # Use real parser logic and mock the asynchronous builder.
-    mocker.patch("linkforge.blender.logic.asynchronous_builder.AsynchronousRobotBuilder")
-    mocker.patch(
-        "linkforge.linkforge_core.validation.security.find_sandbox_root", return_value=subdir
-    )
+    with (
+        patch("linkforge.blender.logic.asynchronous_builder.AsynchronousRobotBuilder"),
+        patch("linkforge_core.validation.security.find_sandbox_root", return_value=subdir),
+    ):
+        result = LINKFORGE_OT_import_urdf.execute(mock_self, bpy.context)
+        assert result == {"FINISHED"}
+        from unittest.mock import ANY
 
-    result = LINKFORGE_OT_import_urdf.execute(mock_self, bpy.context)
-    assert result == {"FINISHED"}
-    mock_self.report.assert_any_call({"INFO"}, mocker.ANY)
+        mock_self.report.assert_any_call({"INFO"}, ANY)
 
 
-def test_import_urdf_directory_candidates(mocker, tmp_path):
+def test_import_urdf_directory_candidates(tmp_path) -> None:
     """Test candidate detection when importing a directory."""
     mock_self = MagicMock(spec=LINKFORGE_OT_import_urdf)
     mock_self.report = MagicMock()
@@ -109,31 +109,31 @@ def test_import_urdf_directory_candidates(mocker, tmp_path):
     subdir.mkdir()
     # Create a candidate file (matching robot.urdf pattern)
     robot_file = subdir / "robot.urdf"
-    robot_file.write_text("<robot name='pkg'/>")
+    robot_file.write_text("<robot name='pkg'><link name='base_link'/></robot>")
     mock_self.filepath = str(subdir)
 
-    # Use real URDF parsing logic and mock the asynchronous builder.
-    mocker.patch("linkforge.blender.logic.asynchronous_builder.AsynchronousRobotBuilder")
-    mocker.patch(
-        "linkforge.linkforge_core.validation.security.find_sandbox_root", return_value=subdir
-    )
+    with (
+        patch("linkforge.blender.logic.asynchronous_builder.AsynchronousRobotBuilder"),
+        patch("linkforge_core.validation.security.find_sandbox_root", return_value=subdir),
+    ):
+        result = LINKFORGE_OT_import_urdf.execute(mock_self, bpy.context)
+        assert result == {"FINISHED"}
+        from unittest.mock import ANY
 
-    result = LINKFORGE_OT_import_urdf.execute(mock_self, bpy.context)
-    assert result == {"FINISHED"}
-    # Verify candidate reporting
-    mock_self.report.assert_any_call({"INFO"}, mocker.ANY)
-    assert "Auto-detected robot description" in mock_self.report.call_args_list[0][0][1]
+        # Verify candidate reporting
+        mock_self.report.assert_any_call({"INFO"}, ANY)
+        assert "Auto-detected robot description" in mock_self.report.call_args_list[0][0][1]
 
-    # Case 2: No valid files
-    robot_file.unlink()
-    # Create a non-matching file
-    (subdir / "other.txt").write_text("not a robot")
-    result = LINKFORGE_OT_import_urdf.execute(mock_self, bpy.context)
-    assert result == {"CANCELLED"}
-    mock_self.report.assert_any_call({"ERROR"}, mocker.ANY)
+        # Case 2: No valid files
+        robot_file.unlink()
+        # Create a non-matching file
+        (subdir / "other.txt").write_text("not a robot")
+        result = LINKFORGE_OT_import_urdf.execute(mock_self, bpy.context)
+        assert result == {"CANCELLED"}
+        mock_self.report.assert_any_call({"ERROR"}, ANY)
 
 
-def test_import_urdf_invoke_check():
+def test_import_urdf_invoke_check() -> None:
     """Test invoke and check methods using class methods on mock."""
     mock_op = MagicMock(spec=LINKFORGE_OT_import_urdf)
     assert LINKFORGE_OT_import_urdf.check(mock_op, bpy.context) is True
@@ -144,7 +144,7 @@ def test_import_urdf_invoke_check():
         assert result == {"RUNNING_MODAL"}
 
 
-def test_import_registration():
+def test_import_registration() -> None:
     """Test operator registration and error recovery branches."""
     unregister()
     register()
@@ -159,7 +159,7 @@ def test_import_registration():
     register()
 
 
-def test_import_xacro_resolution_error(mocker, tmp_path):
+def test_import_xacro_resolution_error(tmp_path) -> None:
     """Test error handling during XACRO resolution."""
     mock_self = MagicMock(spec=LINKFORGE_OT_import_urdf)
     mock_self.report = MagicMock()
@@ -169,18 +169,19 @@ def test_import_xacro_resolution_error(mocker, tmp_path):
     mock_self.filepath = str(xacro_file)
 
     # Simulate a Xacro resolution error (e.g., PackageNotFoundError).
-    mocker.patch(
-        "linkforge.linkforge_core.parsers.XacroResolver.resolve_file",
+    with patch(
+        "linkforge_core.parsers.XacroResolver.resolve_file",
         side_effect=Exception("PackageNotFoundError: my_pkg"),
-    )
+    ):
+        result = LINKFORGE_OT_import_urdf.execute(mock_self, bpy.context)
+        assert result == {"CANCELLED"}
+        from unittest.mock import ANY
 
-    result = LINKFORGE_OT_import_urdf.execute(mock_self, bpy.context)
-    assert result == {"CANCELLED"}
-    mock_self.report.assert_called_with({"ERROR"}, mocker.ANY)
-    assert "PackageNotFoundError" in mock_self.report.call_args[0][1]
+        mock_self.report.assert_called_with({"ERROR"}, ANY)
+        assert "PackageNotFoundError" in mock_self.report.call_args[0][1]
 
 
-def test_import_path_conversion_error(mocker, tmp_path):
+def test_import_path_conversion_error(tmp_path) -> None:
     """Test error handling during URDF path conversion."""
     mock_self = MagicMock(spec=LINKFORGE_OT_import_urdf)
     mock_self.report = MagicMock()
@@ -189,17 +190,18 @@ def test_import_path_conversion_error(mocker, tmp_path):
     urdf_file.write_text("<robot name='broken'/>")
     mock_self.filepath = str(urdf_file)
 
-    mocker.patch(
-        "linkforge.linkforge_core.parsers.URDFParser.parse",
+    with patch(
+        "linkforge_core.parsers.URDFParser.parse",
         side_effect=RobotModelError("Path resolution failed"),
-    )
+    ):
+        result = LINKFORGE_OT_import_urdf.execute(mock_self, bpy.context)
+        assert result == {"CANCELLED"}
+        from unittest.mock import ANY
 
-    result = LINKFORGE_OT_import_urdf.execute(mock_self, bpy.context)
-    assert result == {"CANCELLED"}
-    mock_self.report.assert_called_with({"ERROR"}, mocker.ANY)
+        mock_self.report.assert_called_with({"ERROR"}, ANY)
 
 
-def test_import_main_entry(mocker):
+def test_import_main_entry() -> None:
     """Verify execution of module entry point logic."""
     with (
         patch("linkforge.blender.operators.import_ops.register"),

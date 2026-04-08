@@ -1,10 +1,11 @@
-"""Link model representing a robot link in URDF."""
+"""Link model representing a rigid body within the LinkForge Intermediate Representation (IR)."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Sequence
+from dataclasses import InitVar, dataclass, field
 
-from ..exceptions import RobotModelError
+from ..exceptions import RobotPhysicsError, RobotValidationError, ValidationErrorCode
 from ..utils.string_utils import is_valid_urdf_name
 from .geometry import Geometry, Transform
 from .material import Material
@@ -18,6 +19,10 @@ class InertiaTensor:
     [ ixx  ixy  ixz ]
     [ ixy  iyy  iyz ]
     [ ixz  iyz  izz ]
+
+    The tensor must be physically plausible. Diagonals must be non-zero
+    positive values, and the principal moments must satisfy the triangle
+    inequality.
     """
 
     ixx: float
@@ -31,7 +36,12 @@ class InertiaTensor:
         """Validate inertia tensor values."""
         # All diagonal elements must be positive
         if self.ixx <= 0 or self.iyy <= 0 or self.izz <= 0:
-            raise RobotModelError("Diagonal inertia elements must be positive")
+            raise RobotPhysicsError(
+                ValidationErrorCode.OUT_OF_RANGE,
+                "Diagonal inertia components must be positive",
+                target="DiagonalInertia",
+                value=(self.ixx, self.iyy, self.izz),
+            )
 
         # Triangle inequality for principal moments
         # https://en.wikipedia.org/wiki/Moment_of_inertia#Principal_axes
@@ -42,7 +52,12 @@ class InertiaTensor:
             and self.iyy + self.izz >= self.ixx - epsilon
             and self.izz + self.ixx >= self.iyy - epsilon
         ):
-            raise RobotModelError("Inertia tensor violates triangle inequality")
+            raise RobotPhysicsError(
+                ValidationErrorCode.INERTIA_TRIANGLE_INEQUALITY,
+                "Inertia tensor violates triangle inequality (unphysical)",
+                target="InertiaTriangleInequality",
+                value=(self.ixx, self.iyy, self.izz),
+            )
 
     @classmethod
     def zero(cls) -> InertiaTensor:
@@ -53,16 +68,25 @@ class InertiaTensor:
 
 @dataclass(frozen=True)
 class Inertial:
-    """Inertial properties of a link."""
+    """Inertial properties of a robot link."""
 
     mass: float
     origin: Transform = Transform.identity()
     inertia: InertiaTensor = field(default_factory=InertiaTensor.zero)
 
     def __post_init__(self) -> None:
-        """Validate mass is non-negative."""
+        """Validate inertial properties.
+
+        Raises:
+            RobotPhysicsError: If mass is negative.
+        """
         if self.mass < 0:
-            raise RobotModelError(f"Mass must be non-negative, got {self.mass}")
+            raise RobotPhysicsError(
+                ValidationErrorCode.OUT_OF_RANGE,
+                "Mass must be non-negative",
+                target="Mass",
+                value=self.mass,
+            )
 
 
 @dataclass(frozen=True)
@@ -84,7 +108,7 @@ class Collision:
     name: str | None = None
 
 
-@dataclass(frozen=True)
+@dataclass
 class Link:
     """Robot link (rigid body in the kinematic chain).
 
@@ -93,23 +117,57 @@ class Link:
     """
 
     name: str
-    visuals: list[Visual] = field(default_factory=list)
-    collisions: list[Collision] = field(default_factory=list)
+    initial_visuals: InitVar[Sequence[Visual] | None] = None
+    initial_collisions: InitVar[Sequence[Collision] | None] = None
     inertial: Inertial | None = None
 
-    def __post_init__(self) -> None:
+    _visuals: list[Visual] = field(default_factory=list, init=False)
+    _collisions: list[Collision] = field(default_factory=list, init=False)
+
+    def __post_init__(
+        self,
+        initial_visuals: Sequence[Visual] | None = None,
+        initial_collisions: Sequence[Collision] | None = None,
+    ) -> None:
         """Validate link."""
         if not self.name:
-            raise RobotModelError("Link name cannot be empty")
+            raise RobotValidationError(
+                ValidationErrorCode.NAME_EMPTY, "Link name cannot be empty", target="LinkName"
+            )
 
         # URDF naming convention: lowercase with underscores
         if not is_valid_urdf_name(self.name):
-            raise RobotModelError(
-                f"Link name '{self.name}' contains invalid characters. "
-                "Use only alphanumeric, underscore, or hyphen."
+            raise RobotValidationError(
+                ValidationErrorCode.INVALID_NAME,
+                "Invalid characters in link name",
+                target="LinkName",
+                value=self.name,
             )
+
+        if initial_visuals:
+            self._visuals.extend(initial_visuals)
+        if initial_collisions:
+            self._collisions.extend(initial_collisions)
+
+    @property
+    def visuals(self) -> Sequence[Visual]:
+        """Get visual representations."""
+        return tuple(self._visuals)
+
+    @property
+    def collisions(self) -> Sequence[Collision]:
+        """Get collision representations."""
+        return tuple(self._collisions)
+
+    def add_visual(self, visual: Visual) -> None:
+        """Add a visual representation."""
+        self._visuals.append(visual)
+
+    def add_collision(self, collision: Collision) -> None:
+        """Add a collision representation."""
+        self._collisions.append(collision)
 
     @property
     def mass(self) -> float:
-        """Get link mass (0.0 if no inertial properties)."""
+        """Get link mass (0.0 if no inertial properties are defined)."""
         return self.inertial.mass if self.inertial else 0.0

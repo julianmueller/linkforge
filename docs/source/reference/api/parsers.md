@@ -1,6 +1,6 @@
 # Parsers
 
-URDF and XACRO parsers for converting files to Python objects.
+URDF, XACRO, and SRDF parsers for converting files into Python objects.
 
 ## URDF Parser
 
@@ -13,15 +13,6 @@ URDF and XACRO parsers for converting files to Python objects.
    :show-inheritance:
 ```
 
-### Component Parsing Helpers
-
-```{eval-rst}
-.. autofunction:: linkforge_core.parsers.urdf_parser.parse_link
-
-.. autofunction:: linkforge_core.parsers.urdf_parser.parse_joint
-
-.. autofunction:: linkforge_core.parsers.urdf_parser.parse_sensor_from_gazebo
-```
 
 ## XACRO Parser
 
@@ -45,6 +36,22 @@ The internal engine used by `XACROParser` for hierarchical property resolution a
    :members:
    :undoc-members:
 ```
+
+:::{note}
+**Structural Caching (v1.4.0)**: `XacroResolver` implements a two-phase approach for
+large modular robot cascades. In the **Structural Phase**, all `xacro:include` tags are
+resolved once into an in-memory template tree. In the **Evaluation Phase**, arguments and
+conditional blocks are injected into the cached tree. This means a single Xacro file can
+be evaluated many times with different parameters (e.g., different `prefix=` values for
+two arms) without re-reading or re-parsing any files.
+:::
+
+---
+
+## SRDF Parser
+
+The SRDF parser is documented with the rest of the SRDF layer (models, parser, generator)
+on the dedicated [SRDF reference page](srdf.md).
 
 ## Usage Examples
 
@@ -89,4 +96,5 @@ The parser includes professional-grade protections for production robotics:
 *   **Duplicate Name Resolution**: Re-names conflicting link/joint names (e.g., `link_duplicate_1`) to preserve kinematic tree integrity while alerting the user.
 *   **DoS Protection**: Enforces a maximum XML depth (100 levels) and file size (100 MB) to prevent "XML Bomb" attacks.
 *   **Path Sandboxing**: Validates all mesh paths to prevent directory traversal and ensure assets remain within authorized project folders.
+*   **XACRO Debugging Support**: Natively evaluates and routes `xacro.warning()`, `xacro.error()`, `xacro.fatal()`, and `xacro.message()` calls to the LinkForge Python logger, allowing users to see in-file debug messages directly in the console.
 *   **Resilient Skip**: Malformed geometry or broken joint references are logged as warnings, allowing the rest of the robot to load successfully.

@@ -8,10 +8,10 @@ from linkforge.blender.adapters.blender_to_core import (
     blender_sensor_to_core,
     scene_to_robot,
 )
-from linkforge.linkforge_core.exceptions import RobotModelError
+from linkforge_core.exceptions import RobotValidationError, ValidationErrorCode
 
 
-def test_scene_to_robot_strict_mode_links(clean_scene):
+def test_scene_to_robot_strict_mode_links(clean_scene) -> None:
     """Verify that strict_mode=True raises the original exception on link conversion error."""
     scene = bpy.context.scene
     scene.linkforge.strict_mode = True
@@ -25,9 +25,9 @@ def test_scene_to_robot_strict_mode_links(clean_scene):
     with (
         mock.patch(
             "linkforge.blender.adapters.blender_to_core.blender_link_to_core_with_origin",
-            side_effect=RobotModelError("Link Fail"),
+            side_effect=RobotValidationError(ValidationErrorCode.INVALID_VALUE, "Link Fail"),
         ),
-        pytest.raises(RobotModelError, match="Link Fail"),
+        pytest.raises(RobotValidationError, match=r"\[INVALID_VALUE\] Link Fail"),
     ):
         from unittest.mock import MagicMock
 
@@ -36,7 +36,7 @@ def test_scene_to_robot_strict_mode_links(clean_scene):
         scene_to_robot(context)
 
 
-def test_scene_to_robot_strict_mode_others(clean_scene):
+def test_scene_to_robot_strict_mode_others(clean_scene) -> None:
     """Verify strict_mode=True for joints, sensors, and transmissions."""
     scene = bpy.context.scene
     scene.linkforge.strict_mode = True
@@ -54,29 +54,31 @@ def test_scene_to_robot_strict_mode_others(clean_scene):
         ),
         mock.patch(
             "linkforge.blender.adapters.blender_to_core.blender_joint_to_core",
-            side_effect=RobotModelError("Joint Fail"),
+            side_effect=RobotValidationError(ValidationErrorCode.NOT_FOUND, "Joint Fail"),
         ),
     ):
         from unittest.mock import MagicMock
 
         context = MagicMock()
         context.scene = scene
-        with pytest.raises(RobotModelError, match="Joint Fail"):
+        with pytest.raises(RobotValidationError, match=r"\[NOT_FOUND\] Joint Fail"):
             scene_to_robot(context)
 
 
-def test_sensor_attachment_error(clean_scene):
+def test_sensor_attachment_error(clean_scene) -> None:
     """Verify RobotModelError when sensor has no attached link."""
     s = bpy.data.objects.new("Sensor", None)
     bpy.context.collection.objects.link(s)
     s.linkforge_sensor.is_robot_sensor = True
     s.linkforge_sensor.attached_link = None
 
-    with pytest.raises(RobotModelError, match="is not attached to any link"):
+    with pytest.raises(
+        RobotValidationError, match=r"\[NOT_FOUND\] Sensor is not attached to any link"
+    ):
         blender_sensor_to_core(s)
 
 
-def test_contact_sensor_fallback(clean_scene):
+def test_contact_sensor_fallback(clean_scene) -> None:
     """Verify contact sensor collision name fallback."""
     link = bpy.data.objects.new("Link", None)
     bpy.context.collection.objects.link(link)
@@ -94,7 +96,7 @@ def test_contact_sensor_fallback(clean_scene):
     assert core.contact_info.collision == "test_link_collision"
 
 
-def test_ros2_control_logic_gaps(clean_scene):
+def test_ros2_control_logic_gaps(clean_scene) -> None:
     """Hit remaining branches in ROS2 control conversion."""
     # props is None
     assert blender_ros2_control_to_core(None) is None
@@ -125,7 +127,7 @@ def test_ros2_control_logic_gaps(clean_scene):
     assert ctrl.joints[0].state_interfaces == ["position"]
 
 
-def test_inertia_mesh_fallback(clean_scene):
+def test_inertia_mesh_fallback(clean_scene) -> None:
     """Verify mesh inertia fallback to bounding box."""
     from linkforge.blender.adapters.blender_to_core import blender_link_to_core_with_origin
 
@@ -150,7 +152,7 @@ def test_inertia_mesh_fallback(clean_scene):
             assert core.inertial.inertia.ixx > 0
 
 
-def test_scene_to_robot_non_strict_errors(clean_scene):
+def test_scene_to_robot_non_strict_errors(clean_scene) -> None:
     """Verify that strict_mode=False collects errors instead of raising."""
     scene = bpy.context.scene
     scene.linkforge.strict_mode = False
@@ -167,11 +169,11 @@ def test_scene_to_robot_non_strict_errors(clean_scene):
     with (
         mock.patch(
             "linkforge.blender.adapters.blender_to_core.blender_joint_to_core",
-            side_effect=Exception("Joint Fail"),
+            side_effect=RobotValidationError(ValidationErrorCode.INVALID_VALUE, "Joint Fail"),
         ),
         mock.patch(
             "linkforge.blender.adapters.blender_to_core.blender_sensor_to_core",
-            side_effect=Exception("Sensor Fail"),
+            side_effect=RobotValidationError(ValidationErrorCode.INVALID_VALUE, "Sensor Fail"),
         ),
     ):
         # Also trigger transmission and ros2_control errors
@@ -181,26 +183,27 @@ def test_scene_to_robot_non_strict_errors(clean_scene):
 
         with mock.patch(
             "linkforge.blender.adapters.blender_to_core.blender_transmission_to_core",
-            side_effect=Exception("Trans Fail"),
+            side_effect=RobotValidationError(ValidationErrorCode.INVALID_VALUE, "Trans Fail"),
         ):
             scene.linkforge.use_ros2_control = True
             scene.linkforge.ros2_control_name = "test"
             with mock.patch(
                 "linkforge.blender.adapters.blender_to_core.blender_ros2_control_to_core",
-                side_effect=Exception("Control Fail"),
+                side_effect=RobotValidationError(ValidationErrorCode.INVALID_VALUE, "Control Fail"),
             ):
                 from unittest.mock import MagicMock
 
                 context = MagicMock()
                 context.scene = scene
-                # It always raises RobotModelError at the end if errors exist
+                # It always raises RobotValidationError at the end if errors exist
                 with pytest.raises(
-                    RobotModelError, match="The following configuration errors were found"
+                    RobotValidationError,
+                    match=r"Multiple configuration errors found",
                 ):
                     scene_to_robot(context)
 
 
-def test_material_default_fallback(clean_scene):
+def test_material_default_fallback(clean_scene) -> None:
     """Verify material default gray color fallback."""
     from linkforge.blender.adapters.blender_to_core import get_object_material
 
@@ -215,7 +218,7 @@ def test_material_default_fallback(clean_scene):
     assert mat.color.r == 0.8
 
 
-def test_link_conversion_edge_cases(clean_scene):
+def test_link_conversion_edge_cases(clean_scene) -> None:
     """Verify link conversion with custom urdf_name and invalid objects."""
     o = bpy.data.objects.new("Link", None)
     bpy.context.collection.objects.link(o)
@@ -244,14 +247,14 @@ def test_link_conversion_edge_cases(clean_scene):
     assert blender_link_to_core_with_origin(o_non) is None
 
 
-def test_scene_to_robot_empty_context():
+def test_scene_to_robot_empty_context() -> None:
     """Verify scene_to_robot returns early if context is invalid."""
     robot, errors = scene_to_robot(None)
     assert robot.name == "empty_robot"
     assert errors == []
 
 
-def test_extract_mesh_triangles_none():
+def test_extract_mesh_triangles_none() -> None:
     """Verify extract_mesh_triangles returns None for non-meshes."""
     from linkforge.blender.adapters.blender_to_core import extract_mesh_triangles
 
@@ -260,7 +263,7 @@ def test_extract_mesh_triangles_none():
     assert extract_mesh_triangles(o) is None
 
 
-def test_ros2_control_state_default(clean_scene):
+def test_ros2_control_state_default(clean_scene) -> None:
     """Hit state_ifs default."""
     scene = bpy.context.scene
     scene.linkforge.ros2_control_name = "test"
@@ -275,7 +278,7 @@ def test_ros2_control_state_default(clean_scene):
     assert core.joints[0].state_interfaces == ["position"]
 
 
-def test_ros2_control_sensor_strips_commands(clean_scene):
+def test_ros2_control_sensor_strips_commands(clean_scene) -> None:
     """Verify that sensor-type control systems strip command interfaces during export."""
     scene = bpy.context.scene
     scene.linkforge.ros2_control_name = "test_sensor"
@@ -300,7 +303,7 @@ def test_ros2_control_sensor_strips_commands(clean_scene):
     assert core.joints[0].state_interfaces == ["position"]
 
 
-def test_ros2_control_actuator_strips_extra_joints(clean_scene):
+def test_ros2_control_actuator_strips_extra_joints(clean_scene) -> None:
     """Verify that 'actuator' type systems strip extra joints and log a warning."""
     scene = bpy.context.scene
     robot_props = scene.linkforge

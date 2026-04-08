@@ -9,7 +9,7 @@ from linkforge_core.models import Color, Joint, JointType, Link, Material, Robot
 from linkforge_core.models.geometry import Box, Cylinder, Sphere, Transform, Vector3
 
 
-def test_extract_dimensions_cylinders():
+def test_extract_dimensions_cylinders() -> None:
     """Test that repeated cylinder dimensions are extracted as properties."""
     # Create robot with 4 identical wheels
     base = Link(name="base_link")
@@ -17,7 +17,9 @@ def test_extract_dimensions_cylinders():
     joints = []
 
     for i, name in enumerate(["fl_wheel", "fr_wheel", "rl_wheel", "rr_wheel"]):
-        wheel = Link(name=name, visuals=[Visual(geometry=Cylinder(radius=0.05, length=0.02))])
+        wheel = Link(
+            name=name, initial_visuals=[Visual(geometry=Cylinder(radius=0.05, length=0.02))]
+        )
         wheels.append(wheel)
         joint = Joint(
             name=f"{name}_joint",
@@ -59,12 +61,16 @@ def test_extract_dimensions_cylinders():
         assert cyl.get("length") == "${wheel_length}", "Length should use property"
 
 
-def test_extract_dimensions_boxes():
+def test_extract_dimensions_boxes() -> None:
     """Test that repeated box dimensions are extracted as properties."""
     # Create robot with 2 identical legs
     base = Link(name="base_link")
-    left_leg = Link(name="left_leg", visuals=[Visual(geometry=Box(size=Vector3(0.1, 0.1, 0.5)))])
-    right_leg = Link(name="right_leg", visuals=[Visual(geometry=Box(size=Vector3(0.1, 0.1, 0.5)))])
+    left_leg = Link(
+        name="left_leg", initial_visuals=[Visual(geometry=Box(size=Vector3(0.1, 0.1, 0.5)))]
+    )
+    right_leg = Link(
+        name="right_leg", initial_visuals=[Visual(geometry=Box(size=Vector3(0.1, 0.1, 0.5)))]
+    )
 
     j1 = Joint("j1", JointType.FIXED, "base_link", "left_leg")
     j2 = Joint("j2", JointType.FIXED, "base_link", "right_leg")
@@ -94,7 +100,7 @@ def test_extract_dimensions_boxes():
         assert box.get("size") == "${leg_width} ${leg_depth} ${leg_height}"
 
 
-def test_extract_dimensions_spheres():
+def test_extract_dimensions_spheres() -> None:
     """Test that repeated sphere dimensions are extracted as properties."""
     # Create robot with 3 identical balls
     base = Link(name="base_link")
@@ -102,7 +108,7 @@ def test_extract_dimensions_spheres():
     joints = []
 
     for i in range(3):
-        ball = Link(name=f"ball{i}", visuals=[Visual(geometry=Sphere(radius=0.03))])
+        ball = Link(name=f"ball{i}", initial_visuals=[Visual(geometry=Sphere(radius=0.03))])
         balls.append(ball)
         joint = Joint(f"j{i}", JointType.FIXED, "base_link", f"ball{i}")
         joints.append(joint)
@@ -128,12 +134,16 @@ def test_extract_dimensions_spheres():
         assert sphere.get("radius") == "${ball_radius}"
 
 
-def test_no_extract_unique_dimensions():
+def test_no_extract_unique_dimensions() -> None:
     """Test that unique dimensions are NOT extracted as properties."""
     # Create robot with unique dimensions
     base = Link(name="base_link")
-    wheel1 = Link(name="wheel1", visuals=[Visual(geometry=Cylinder(radius=0.05, length=0.02))])
-    wheel2 = Link(name="wheel2", visuals=[Visual(geometry=Cylinder(radius=0.07, length=0.03))])
+    wheel1 = Link(
+        name="wheel1", initial_visuals=[Visual(geometry=Cylinder(radius=0.05, length=0.02))]
+    )
+    wheel2 = Link(
+        name="wheel2", initial_visuals=[Visual(geometry=Cylinder(radius=0.07, length=0.03))]
+    )
 
     j1 = Joint("j1", JointType.FIXED, "base_link", "wheel1")
     j2 = Joint("j2", JointType.FIXED, "base_link", "wheel2")
@@ -159,18 +169,22 @@ def test_no_extract_unique_dimensions():
     assert cylinders[1].get("length") == "0.03"
 
 
-def test_extract_dimensions_mixed_geometries():
+def test_extract_dimensions_mixed_geometries() -> None:
     """Test dimension extraction with multiple geometry types."""
     # Create robot with cylinders + boxes
     base = Link(name="base_link")
 
     # 2 identical wheels
-    wheel1 = Link(name="wheel1", visuals=[Visual(geometry=Cylinder(radius=0.05, length=0.02))])
-    wheel2 = Link(name="wheel2", visuals=[Visual(geometry=Cylinder(radius=0.05, length=0.02))])
+    wheel1 = Link(
+        name="wheel1", initial_visuals=[Visual(geometry=Cylinder(radius=0.05, length=0.02))]
+    )
+    wheel2 = Link(
+        name="wheel2", initial_visuals=[Visual(geometry=Cylinder(radius=0.05, length=0.02))]
+    )
 
     # 2 identical legs
-    leg1 = Link(name="leg1", visuals=[Visual(geometry=Box(size=Vector3(0.1, 0.1, 0.5)))])
-    leg2 = Link(name="leg2", visuals=[Visual(geometry=Box(size=Vector3(0.1, 0.1, 0.5)))])
+    leg1 = Link(name="leg1", initial_visuals=[Visual(geometry=Box(size=Vector3(0.1, 0.1, 0.5)))])
+    leg2 = Link(name="leg2", initial_visuals=[Visual(geometry=Box(size=Vector3(0.1, 0.1, 0.5)))])
 
     joints = [
         Joint("j1", JointType.FIXED, "base_link", "wheel1"),
@@ -202,13 +216,15 @@ def test_extract_dimensions_mixed_geometries():
     assert "leg_height" in prop_names
 
 
-def test_dimension_floating_point_tolerance():
+def test_dimension_floating_point_tolerance() -> None:
     """Test that similar dimensions are grouped with tolerance."""
     # Create wheels with slightly different dimensions (within tolerance)
     base = Link(name="base_link")
-    wheel1 = Link(name="wheel1", visuals=[Visual(geometry=Cylinder(radius=0.05, length=0.02))])
+    wheel1 = Link(
+        name="wheel1", initial_visuals=[Visual(geometry=Cylinder(radius=0.05, length=0.02))]
+    )
     wheel2 = Link(
-        name="wheel2", visuals=[Visual(geometry=Cylinder(radius=0.050001, length=0.02))]
+        name="wheel2", initial_visuals=[Visual(geometry=Cylinder(radius=0.050001, length=0.02))]
     )  # Slightly different
 
     j1 = Joint("j1", JointType.FIXED, "base_link", "wheel1")
@@ -229,14 +245,18 @@ def test_dimension_floating_point_tolerance():
     assert "wheel_length" in prop_names
 
 
-def test_dimension_property_naming():
+def test_dimension_property_naming() -> None:
     """Test that property names are descriptive."""
     # Test various naming scenarios
     base = Link(name="base_link")
 
     # Scenario 1: Common suffix (fl_wheel, fr_wheel → wheel)
-    fl_wheel = Link(name="fl_wheel", visuals=[Visual(geometry=Cylinder(radius=0.05, length=0.02))])
-    fr_wheel = Link(name="fr_wheel", visuals=[Visual(geometry=Cylinder(radius=0.05, length=0.02))])
+    fl_wheel = Link(
+        name="fl_wheel", initial_visuals=[Visual(geometry=Cylinder(radius=0.05, length=0.02))]
+    )
+    fr_wheel = Link(
+        name="fr_wheel", initial_visuals=[Visual(geometry=Cylinder(radius=0.05, length=0.02))]
+    )
 
     joints = [
         Joint("j1", JointType.FIXED, "base_link", "fl_wheel"),
@@ -259,12 +279,16 @@ def test_dimension_property_naming():
     assert "wheel_length" in prop_names
 
 
-def test_extract_dimensions_disabled():
+def test_extract_dimensions_disabled() -> None:
     """Test that dimensions are NOT extracted when extract_dimensions=False."""
     # Create robot with repeated dimensions
     base = Link(name="base_link")
-    wheel1 = Link(name="wheel1", visuals=[Visual(geometry=Cylinder(radius=0.05, length=0.02))])
-    wheel2 = Link(name="wheel2", visuals=[Visual(geometry=Cylinder(radius=0.05, length=0.02))])
+    wheel1 = Link(
+        name="wheel1", initial_visuals=[Visual(geometry=Cylinder(radius=0.05, length=0.02))]
+    )
+    wheel2 = Link(
+        name="wheel2", initial_visuals=[Visual(geometry=Cylinder(radius=0.05, length=0.02))]
+    )
 
     j1 = Joint("j1", JointType.FIXED, "base_link", "wheel1")
     j2 = Joint("j2", JointType.FIXED, "base_link", "wheel2")
@@ -287,17 +311,19 @@ def test_extract_dimensions_disabled():
         assert cyl.get("length") == "0.02"
 
 
-def test_extract_dimensions_with_materials():
+def test_extract_dimensions_with_materials() -> None:
     """Test that dimension and material extraction work together."""
     # Create robot with repeated dimensions AND materials
     base = Link(name="base_link")
     mat = Material(name="black", color=Color(0, 0, 0, 1))
 
     wheel1 = Link(
-        name="wheel1", visuals=[Visual(geometry=Cylinder(radius=0.05, length=0.02), material=mat)]
+        name="wheel1",
+        initial_visuals=[Visual(geometry=Cylinder(radius=0.05, length=0.02), material=mat)],
     )
     wheel2 = Link(
-        name="wheel2", visuals=[Visual(geometry=Cylinder(radius=0.05, length=0.02), material=mat)]
+        name="wheel2",
+        initial_visuals=[Visual(geometry=Cylinder(radius=0.05, length=0.02), material=mat)],
     )
 
     j1 = Joint("j1", JointType.FIXED, "base_link", "wheel1")

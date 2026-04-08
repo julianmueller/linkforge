@@ -8,15 +8,15 @@ from __future__ import annotations
 import contextlib
 
 import bpy
-from bpy.props import BoolProperty, FloatProperty
+from bpy.props import BoolProperty, FloatProperty, StringProperty
 from bpy.types import AddonPreferences, Context
 
 
-def update_joint_axes_visibility(self: LinkForgePreferences, context: Context) -> None:
+def update_joint_axes_visibility(_self: LinkForgePreferences, _context: Context) -> None:
     """Callback when show_joint_axes changes - manage draw handler and force viewport redraw."""
     from .visualization import joint_gizmos
 
-    joint_gizmos.update_viz_handle(context)
+    joint_gizmos.update_viz_handle(_context)
 
 
 def update_joint_empty_size(self: LinkForgePreferences, context: Context) -> None:
@@ -89,17 +89,17 @@ def update_link_empty_size(self: LinkForgePreferences, context: Context) -> None
                     area.tag_redraw()
 
 
-def update_inertia_visibility(self: LinkForgePreferences, context: Context) -> None:
+def update_inertia_visibility(_self: LinkForgePreferences, _context: Context) -> None:
     """Callback when show_inertia_gizmos changes."""
     from .visualization import inertia_gizmos
 
     inertia_gizmos.tag_redraw()
     # If the user just enabled it, make sure the handler is registered
-    if self.show_inertia_gizmos:
+    if _self.show_inertia_gizmos:
         inertia_gizmos.ensure_inertia_handler()
 
 
-def update_inertia_size(self: LinkForgePreferences, context: Context) -> None:
+def update_inertia_size(_self: LinkForgePreferences, _context: Context) -> None:
     """Callback when inertia_gizmo_size changes."""
     from .visualization import inertia_gizmos
 
@@ -210,7 +210,14 @@ class LinkForgePreferences(AddonPreferences):
         update=update_inertia_size,
     )
 
-    def draw(self, context: Context) -> None:
+    # File and Environment Paths
+    additional_search_paths: StringProperty(  # type: ignore
+        name="Additional ROS Package Paths",
+        description="Comma (or OS path separator) separated fallback paths for package:// meshes (useful for Snap/Flatpak)",
+        default="",
+    )
+
+    def draw(self, _context: Context) -> None:
         """Draw the preferences UI."""
         layout = self.layout
 
@@ -260,6 +267,19 @@ class LinkForgePreferences(AddonPreferences):
         if self.show_inertia_gizmos:
             row = box.row()
             row.prop(self, "inertia_gizmo_size", text="Frame Size", slider=True)
+
+        # Environment & Paths
+        layout.separator()
+        box = layout.box()
+        box.label(text="Environment & Paths", icon="FILE_FOLDER")
+        row = box.row()
+        row.prop(self, "additional_search_paths")
+        col = box.column(align=True)
+        col.scale_y = 0.7
+        col.label(
+            text="Fallback ROS workspace paths for package:// resolution (comma or OS-path separated)",
+            icon="INFO",
+        )
 
         # General help text
         layout.separator()

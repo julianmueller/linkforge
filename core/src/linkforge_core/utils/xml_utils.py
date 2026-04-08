@@ -1,9 +1,11 @@
 """XML utility functions for LinkForge."""
 
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from datetime import datetime
+from typing import Any
 
-from ..exceptions import RobotModelError
+from ..exceptions import RobotMathError, RobotValidationError, ValidationErrorCode
 from ..models import Vector3
 
 # Register XACRO namespace to ensure standard 'xacro:' prefix in exports
@@ -20,12 +22,14 @@ def validate_xml_depth(element: ET.Element, depth: int = 0) -> None:
         depth: Current nesting depth
 
     Raises:
-        RobotModelError: If depth exceeds MAX_XML_DEPTH
+        RobotValidationError: If depth exceeds MAX_XML_DEPTH
     """
     if depth > MAX_XML_DEPTH:
-        raise RobotModelError(
-            f"XML nesting too deep: {depth} levels (maximum {MAX_XML_DEPTH}). "
-            "This may indicate a malicious or corrupted XML file."
+        raise RobotValidationError(
+            ValidationErrorCode.OUT_OF_RANGE,
+            f"XML nesting depth {depth} exceeds limit {MAX_XML_DEPTH}",
+            target="XMLDepth",
+            value=depth,
         )
 
     for child in element:
@@ -100,7 +104,10 @@ def serialize_xml(
 
 
 def parse_float(
-    text: str | None, attribute_name: str = "value", default: float | None = None
+    text: str | None,
+    attribute_name: str = "value",
+    default: float | None = None,
+    check_name: str | None = None,
 ) -> float:
     """Parse float value from XML with comprehensive validation.
 
@@ -108,81 +115,241 @@ def parse_float(
         text: String to parse
         attribute_name: Context for error messages
         default: Default value if text is None
+        check_name: Alias for attribute_name used in some parsers
 
     Returns:
         Parsed float
 
     Raises:
-        RobotModelError: If input is invalid
+        RobotMathError: If input is invalid
+        RobotValidationError: If attribute is missing
     """
     import math
 
+    # Alias check_name if provided
+    report_name = check_name or attribute_name
+
     if text is not None and not text.strip():
         text = None
 
     if text is None:
         if default is not None:
             return default
-        raise RobotModelError(f"Missing required attribute '{attribute_name}'")
+        raise RobotValidationError(
+            ValidationErrorCode.VALUE_EMPTY,
+            f"Missing required attribute: {report_name}",
+            target=report_name,
+        )
 
     try:
         value = float(text)
-        if math.isnan(value):
-            raise RobotModelError("NaN (Not a Number) values are not allowed")
-        if math.isinf(value):
-            raise RobotModelError("Infinite values are not allowed")
+        if math.isnan(value) or math.isinf(value):
+            raise RobotMathError(
+                ValidationErrorCode.INVALID_VALUE,
+                f"Non-finite float value '{value}' in {report_name}",
+                target=report_name,
+                value=value,
+            )
+
         # Sanity check for reasonable values (Standard LinkForge limit)
         if not (-1e10 < value < 1e10):
-            raise RobotModelError(f"Value {value} is outside reasonable range (-1e10 to 1e10)")
+            raise RobotMathError(
+                ValidationErrorCode.OUT_OF_RANGE,
+                f"Float value '{value}' in {report_name} is outside reasonable range",
+                target=report_name,
+                value=value,
+            )
+
         return value
-    except ValueError as e:
-        raise RobotModelError(f"Invalid {attribute_name} value '{text}': {e}") from e
+    except ValueError:
+        raise RobotMathError(
+            ValidationErrorCode.INVALID_VALUE,
+            f"Invalid float format '{text}' in {report_name}",
+            target=report_name,
+            value=text,
+        ) from None
 
 
-def parse_int(text: str | None, attribute_name: str = "value", default: int | None = None) -> int:
-    """Parse integer value from XML with comprehensive validation."""
+def parse_int(
+    text: str | None,
+    attribute_name: str = "value",
+    default: int | None = None,
+    check_name: str | None = None,
+) -> int:
+    """Parse integer value from XML with comprehensive validation.
+
+    Args:
+        text: String to parse
+        attribute_name: Context for error messages
+        default: Default value if text is None
+        check_name: Alias for attribute_name for consistent reporting
+
+    Returns:
+        Parsed integer
+
+    Raises:
+        RobotMathError: If input format is invalid or value is out of range
+        RobotValidationError: If attribute is missing and no default is provided
+    """
+    report_name = check_name or attribute_name
+
     if text is not None and not text.strip():
         text = None
 
     if text is None:
         if default is not None:
             return default
-        raise RobotModelError(f"Missing required attribute '{attribute_name}'")
+        raise RobotValidationError(
+            ValidationErrorCode.VALUE_EMPTY,
+            f"Missing required attribute: {report_name}",
+            target=report_name,
+        )
 
     try:
         value = int(text)
         # Sanity check for reasonable values (standard LinkForge limit)
         if not (-1000000 < value < 1000000):
-            raise RobotModelError(f"Value {value} is outside reasonable range")
+            raise RobotMathError(
+                ValidationErrorCode.OUT_OF_RANGE,
+                f"Integer value '{value}' in {report_name} is outside reasonable range",
+                target=report_name,
+                value=value,
+            )
         return value
-    except ValueError as e:
-        raise RobotModelError(f"Invalid {attribute_name} value '{text}': {e}") from e
+    except ValueError:
+        raise RobotMathError(
+            ValidationErrorCode.INVALID_VALUE,
+            f"Invalid integer format '{text}' in {report_name}",
+            target=report_name,
+            value=text,
+        ) from None
 
 
 def parse_vector3(text: str) -> Vector3:
-    """Parse space-separated vector3 string."""
+    """Parse space-separated vector3 string.
+
+    Args:
+        text: Space-separated string (e.g. "1.0 2.0 3.0")
+
+    Returns:
+        Vector3 model
+
+    Raises:
+        RobotValidationError: If vector format is invalid or components are missing
+        RobotMathError: If component values are invalid
+    """
     parts = text.strip().split()
     if len(parts) != 3:
-        raise RobotModelError(f"Expected 3 values for Vector3, got {len(parts)}: '{text}'")
+        raise RobotValidationError(
+            ValidationErrorCode.INVALID_VALUE,
+            f"Expected 3 values for Vector3, got {len(parts)}",
+            target="Vector3",
+            value=text,
+        )
     try:
         x = parse_float(parts[0], "x")
         y = parse_float(parts[1], "y")
         z = parse_float(parts[2], "z")
         return Vector3(x, y, z)
-    except (RobotModelError, ValueError, IndexError) as e:
-        raise RobotModelError(f"Invalid Vector3 format '{text}': {e}") from e
+    except (RobotMathError, RobotValidationError):
+        raise
 
 
 def parse_optional_bool(elem: ET.Element, tag: str, default: str = "false") -> bool | None:
-    """Parse optional boolean element."""
+    """Parse optional boolean element.
+
+    Args:
+        elem: Parent XML element
+        tag: Sub-element tag to find
+        default: Default string value if tag is found but content is empty
+
+    Returns:
+        Boolean value if tag exists, else None
+    """
     if elem.find(tag) is not None:
         return elem.findtext(tag, default).lower() == "true"
     return None
 
 
 def parse_optional_float(elem: ET.Element, tag: str, default: float | None = 0.0) -> float | None:
-    """Parse optional float element."""
+    """Parse optional float element.
+
+    Args:
+        elem: Parent XML element
+        tag: Sub-element tag to find
+        default: Default float value if tag content is missing
+
+    Returns:
+        Parsed float if tag exists, else None
+
+    Raises:
+        RobotMathError: If input value is invalid or out of range
+        RobotValidationError: If parsing logic fails
+    """
     if elem.find(tag) is not None:
         text = elem.findtext(tag)
         return parse_float(text, tag, default=default)
     return None
+
+
+def xml_add_text(parent: ET.Element, tag: str, value: Any) -> ET.Element:
+    """Create a sub-element with text content.
+
+    Args:
+        parent: The parent XML element.
+        tag: The tag name for the new element.
+        value: The text content to set. Will be converted to string if not None.
+
+    Returns:
+        The newly created XML element.
+    """
+    elem = ET.SubElement(parent, tag)
+    if value is not None:
+        elem.text = str(value)
+    return elem
+
+
+def xml_add_vector(
+    parent: ET.Element,
+    tag: str,
+    vector: Vector3,
+    formatter: Callable[[float], str],
+) -> ET.Element:
+    """Create a sub-element for a vector relying on a formatter for the values.
+
+    Args:
+        parent: The parent XML element.
+        tag: The tag name for the new element.
+        vector: The Vector3 object containing the values.
+        formatter: A callable that takes a float and returns a string (e.g., format_float).
+
+    Returns:
+        The newly created XML element with the formatted text string.
+    """
+    # Create text from formatted components
+    text_val = f"{formatter(vector.x)} {formatter(vector.y)} {formatter(vector.z)}"
+    return xml_add_text(parent, tag, text_val)
+
+
+def create_xml_element(
+    parent: ET.Element,
+    tag: str,
+    formatter: Callable[[Any], str] | None = None,
+    **kwargs: Any,
+) -> ET.Element:
+    """Create an XML element, stripping None values and converting types to str.
+
+    Args:
+        parent: Parent XML element
+        tag: Tag name for the new element
+        formatter: Optional callable to format values before string conversion
+        **kwargs: Attributes for the new element
+
+    Returns:
+        The newly created XML element
+    """
+    if formatter:
+        attrib = {k: formatter(v) for k, v in kwargs.items() if v is not None}
+    else:
+        attrib = {k: str(v) for k, v in kwargs.items() if v is not None}
+    return ET.SubElement(parent, tag, attrib)

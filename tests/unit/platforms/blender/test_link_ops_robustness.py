@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import bpy
 import pytest
@@ -9,8 +9,8 @@ from linkforge.blender.operators.link_ops import (
 )
 
 
-def test_execute_collision_preview_update_branches(clean_scene):
-    """Hit lines 62-81 in link_ops.py."""
+def test_execute_collision_preview_update_branches(clean_scene) -> None:
+    """Hit edge cases."""
     link_obj = bpy.data.objects.new("Link", None)
     bpy.context.collection.objects.link(link_obj)
     link_obj.linkforge.is_robot_link = True
@@ -20,25 +20,30 @@ def test_execute_collision_preview_update_branches(clean_scene):
     bpy.context.collection.objects.link(col_obj)
     col_obj.parent = link_obj
 
-    # Line 62: No view_layer
+    # No view_layer
     with patch("linkforge.blender.operators.link_ops.bpy") as mock_bpy:
-        mock_bpy.data.objects = {"Link": link_obj}
+        # Simulate missing view_layer context
+        mock_bpy.data = bpy.data
+        mock_bpy.context = MagicMock()
         mock_bpy.context.view_layer = None
+
         # We need to set the global _preview_pending_object
         import linkforge.blender.operators.link_ops as link_ops
 
         link_ops._preview_pending_object = link_obj
+        link_ops._preview_last_request_time = 0.0
         assert execute_collision_preview_update() is None
 
-    # Line 73: imported_from_urdf
+    # imported_from_urdf
     col_obj["imported_from_urdf"] = True
     link_ops._preview_pending_object = link_obj
+    link_ops._preview_last_request_time = 0.0
     assert execute_collision_preview_update() is None
     col_obj["imported_from_urdf"] = False
 
 
-def test_regenerate_collision_mesh_validation(clean_scene):
-    """Hit lines 528-533 (validation in regenerate)."""
+def test_regenerate_collision_mesh_validation(clean_scene) -> None:
+    """Hit edge cases validation in regenerate."""
     # Passing None or non-link object
     regenerate_collision_mesh(None, "AUTO", bpy.context)
 
@@ -46,8 +51,8 @@ def test_regenerate_collision_mesh_validation(clean_scene):
     regenerate_collision_mesh(o, "AUTO", bpy.context)
 
 
-def test_create_collision_failure_branches(clean_scene):
-    """Hit lines 553-555 (collision creation failure)."""
+def test_create_collision_failure_branches(clean_scene) -> None:
+    """Hit edge cases collision creation failure."""
     link_obj = bpy.data.objects.new("Link", None)
     bpy.context.collection.objects.link(link_obj)
     link_obj.linkforge.is_robot_link = True
@@ -60,8 +65,8 @@ def test_create_collision_failure_branches(clean_scene):
         assert create_collision_for_link(link_obj, "BOX", bpy.context) is None
 
 
-def test_generate_collision_all_skip(clean_scene):
-    """Hit lines 591-592 (skipping links with no visuals)."""
+def test_generate_collision_all_skip(clean_scene) -> None:
+    """Hit edge cases skipping links with no visuals."""
     link_obj = bpy.data.objects.new("EmptyLink", None)
     bpy.context.collection.objects.link(link_obj)
     link_obj.linkforge.is_robot_link = True
@@ -71,8 +76,8 @@ def test_generate_collision_all_skip(clean_scene):
     assert not any("_collision" in obj.name for obj in bpy.data.objects)
 
 
-def test_add_material_slot_skip(clean_scene):
-    """Hit lines 1140-1141 (skipping if no visual)."""
+def test_add_material_slot_skip(clean_scene) -> None:
+    """Hit edge cases skipping if no visual."""
     link_obj = bpy.data.objects.new("MatLink", None)
     bpy.context.collection.objects.link(link_obj)
     link_obj.linkforge.is_robot_link = True

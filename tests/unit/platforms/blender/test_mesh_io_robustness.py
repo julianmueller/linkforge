@@ -12,7 +12,7 @@ from linkforge.blender.adapters.mesh_io import (
 from mathutils import Matrix
 
 
-def test_mesh_io_simplification(clean_scene):
+def test_mesh_io_simplification(clean_scene) -> None:
     """Test create_simplified_mesh and decimation."""
     bpy.ops.mesh.primitive_cube_add()
     o = bpy.context.active_object
@@ -30,7 +30,7 @@ def test_mesh_io_simplification(clean_scene):
     bpy.data.objects.remove(simplified, do_unlink=True)
 
 
-def test_export_mesh_error_handling(clean_scene, tmp_path):
+def test_export_mesh_error_handling(clean_scene, tmp_path) -> None:
     """Hit error paths in mesh exporters using Path mocks."""
     bpy.ops.mesh.primitive_monkey_add()
     o = bpy.context.active_object
@@ -45,7 +45,7 @@ def test_export_mesh_error_handling(clean_scene, tmp_path):
         assert export_mesh_glb(o, filepath) is False
 
 
-def test_export_link_mesh_success_and_centering(clean_scene, tmp_path):
+def test_export_link_mesh_success_and_centering(clean_scene, tmp_path) -> None:
     """Verify combined centering and export logic."""
     bpy.ops.mesh.primitive_cube_add(location=(1, 2, 3))
     o = bpy.context.active_object
@@ -124,31 +124,31 @@ def test_export_link_mesh_success_and_centering(clean_scene, tmp_path):
         assert path is None
 
 
-def test_mesh_io_unexpected_errors(clean_scene, tmp_path):
-    """Hit lines 64-69, 120-125, 239-244, 378-380 in mesh_io.py."""
+def test_mesh_io_unexpected_errors(clean_scene, tmp_path) -> None:
+    """Hit edge cases."""
     bpy.ops.mesh.primitive_monkey_add()
     o = bpy.context.active_object
     filepath = tmp_path / "dummy.stl"
 
-    # Line 64 (TypeError in STL)
+    # (TypeError in STL)
     with patch("linkforge.blender.adapters.mesh_io.bpy.ops.wm") as mock_wm:
         mock_wm.stl_export.side_effect = TypeError("Unexpected")
         with pytest.raises(TypeError):
             export_mesh_stl(o, filepath)
 
-    # Line 120 (AttributeError in OBJ)
+    # (AttributeError in OBJ)
     with patch("linkforge.blender.adapters.mesh_io.bpy.ops.wm") as mock_wm:
         mock_wm.obj_export.side_effect = AttributeError("Unexpected")
         with pytest.raises(AttributeError):
             export_mesh_obj(o, filepath)
 
-    # Line 239 (KeyError in GLB)
+    # (KeyError in GLB)
     with patch("linkforge.blender.adapters.mesh_io.bpy.ops.export_scene") as mock_escene:
         mock_escene.gltf.side_effect = KeyError("Unexpected")
         with pytest.raises(KeyError):
             export_mesh_glb(o, filepath)
 
-    # Line 378 (General Exception in export_link_mesh)
+    # (General Exception in export_link_mesh)
     # We patch the call site's view of evaluated_depsgraph_get by patching the context object itself
     with patch("linkforge.blender.adapters.mesh_io.bpy.context") as mock_ctx:
         # Re-inject view_layer so earlier parts of export_link_mesh don't fail

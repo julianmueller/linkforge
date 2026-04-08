@@ -3,79 +3,13 @@
 from __future__ import annotations
 
 import contextlib
-import typing
 
 import bpy
 from bpy.props import StringProperty
-from bpy.types import Context, Object, Operator, Scene
+from bpy.types import Context, Operator
 
-from ..utils.decorators import safe_execute
-
-
-def build_tree_structure(
-    scene: Scene | None,
-) -> tuple[
-    dict[str, list[tuple[str, str, str]]],
-    str | None,
-    dict[tuple[str, str], Object],
-    dict[str, Object],
-]:
-    """Build a kinematic tree from the scene objects.
-
-    Iterates through all objects in the scene to reconstruct the parent-child relationships
-    defined by LinkForge joints.
-
-    Args:
-        scene: The Blender scene to analyze.
-
-    Returns:
-        A tuple containing:
-        - tree: Dictionary mapping parent link names to lists of (child_name, joint_name, joint_type).
-        - root_link: The name of the root link (link with no parent), or None if not found.
-        - joints: Dictionary mapping (parent_name, child_name) tuples to the joint Object.
-        - links: Dictionary mapping link names to their Blender Objects.
-    """
-    if not scene:
-        return {}, None, {}, {}
-    # Collect all links
-    links = {
-        obj.linkforge.link_name: obj
-        for obj in scene.objects
-        if hasattr(obj, "linkforge") and typing.cast(typing.Any, obj).linkforge.is_robot_link
-    }
-
-    # Build parent->children mapping from joints
-    tree: dict[str, list[tuple[str, str, str]]] = {link_name: [] for link_name in links}
-    joints = {}
-    root_link = None
-
-    for obj in scene.objects:
-        if (
-            obj.type == "EMPTY"
-            and hasattr(obj, "linkforge_joint")
-            and typing.cast(typing.Any, obj).linkforge_joint.is_robot_joint
-        ):
-            props = typing.cast(typing.Any, obj).linkforge_joint
-            parent = props.parent_link
-            child = props.child_link
-
-            if parent and child and parent in tree:
-                tree[parent].append((child, props.joint_name, props.joint_type))
-                joints[(parent, child)] = obj
-
-    # Find root (link with no parent)
-    all_children = set()
-    for children_list in tree.values():
-        for child, _, _ in children_list:
-            all_children.add(child)
-
-    # Root is a link that appears as parent but not as child
-    for link_name in links:
-        if link_name not in all_children:
-            root_link = link_name
-            break
-
-    return tree, root_link, joints, links
+from ..utils.decorators import OperatorReturn, safe_execute
+from ..utils.scene_utils import build_tree_from_stats, get_robot_statistics
 
 
 class LINKFORGE_OT_select_tree_object(Operator):
@@ -97,7 +31,7 @@ class LINKFORGE_OT_select_tree_object(Operator):
     child_link = StringProperty(name="Child Name")  # type: ignore[func-returns-value]
 
     @safe_execute
-    def execute(self, context: Context) -> set[str]:
+    def execute(self, context: Context) -> OperatorReturn:
         """Execute the operator.
 
         Args:
@@ -137,7 +71,7 @@ class LINKFORGE_OT_select_root_link(Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     @safe_execute
-    def execute(self, context: Context) -> set[str]:
+    def execute(self, context: Context) -> OperatorReturn:
         """Execute the operator.
 
         Args:
@@ -149,7 +83,9 @@ class LINKFORGE_OT_select_root_link(Operator):
         scene = context.scene
         if not scene:
             return {"CANCELLED"}
-        _, root_link, _, _ = build_tree_structure(scene)
+
+        stats = get_robot_statistics(scene)
+        _, root_link, _, _ = build_tree_from_stats(stats)
 
         # Select the root link
         if root_link:
@@ -187,11 +123,11 @@ class LINKFORGE_OT_clear_component_search(Operator):
         """
         if not hasattr(context.scene, "linkforge"):
             return False
-        props = typing.cast(typing.Any, context.scene).linkforge
+        props = getattr(context.scene, "linkforge")
         return bool(props.component_browser_search)
 
     @safe_execute
-    def execute(self, context: Context) -> set[str]:
+    def execute(self, context: Context) -> OperatorReturn:
         """Clear the component browser search field.
 
         Args:
@@ -203,7 +139,7 @@ class LINKFORGE_OT_clear_component_search(Operator):
         scene = context.scene
         if not scene:
             return {"CANCELLED"}
-        props = typing.cast(typing.Any, scene).linkforge
+        props = getattr(scene, "linkforge")
         props.component_browser_search = ""
         return {"FINISHED"}
 

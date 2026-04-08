@@ -9,7 +9,7 @@ import bpy
 from bpy.types import Context, Panel, Scene, UILayout
 
 from ..utils.filter_utils import filter_items_by_name
-from .robot_panel import build_tree_structure
+from ..utils.scene_utils import build_tree_from_stats, get_robot_statistics
 
 
 class LINKFORGE_PT_export_panel(Panel):
@@ -32,14 +32,11 @@ class LINKFORGE_PT_export_panel(Panel):
         layout = self.layout
         if not layout:
             return
-        props = typing.cast(typing.Any, scene).linkforge
+        props = getattr(scene, "linkforge")
 
         # Count components
-        num_links = sum(
-            1
-            for obj in scene.objects
-            if hasattr(obj, "linkforge") and typing.cast(typing.Any, obj).linkforge.is_robot_link
-        )
+        stats = get_robot_statistics(scene)
+        num_links = stats.num_links
 
         # Only show robot properties if there are links in the scene
         if num_links == 0:
@@ -49,37 +46,11 @@ class LINKFORGE_PT_export_panel(Panel):
                 box.label(text="Create links in Forge panel to start", icon="FORWARD")
             return
 
-        # Build tree structure to find root
-        tree, root_link, joints_dict, links_dict = build_tree_structure(scene)
+        tree, root_link, joints_dict, links_dict = build_tree_from_stats(stats)
 
-        # Calculate total mass and DOF
-        total_mass = 0.0
-        total_dof = 0
-        for obj in scene.objects:
-            if (
-                hasattr(obj, "linkforge")
-                and typing.cast(typing.Any, obj).linkforge.is_robot_link
-                and typing.cast(typing.Any, obj).linkforge.mass > 0
-            ):
-                total_mass += typing.cast(typing.Any, obj).linkforge.mass
-
-            # Count DOF from actuated joints
-            if (
-                obj.type == "EMPTY"
-                and hasattr(obj, "linkforge_joint")
-                and typing.cast(typing.Any, obj).linkforge_joint.is_robot_joint
-            ):
-                joint_type = typing.cast(typing.Any, obj).linkforge_joint.joint_type
-                # Map joint types to DOF contribution
-                dof_map = {
-                    "FIXED": 0,
-                    "REVOLUTE": 1,
-                    "CONTINUOUS": 1,
-                    "PRISMATIC": 1,
-                    "PLANAR": 2,
-                    "FLOATING": 6,
-                }
-                total_dof += dof_map.get(joint_type, 0)
+        # Get total mass and DOF from pre-calc stats
+        total_mass = stats.total_mass
+        total_dof = stats.total_dof
 
         # === ROBOT PROPERTIES (with essential stats) ===
         layout.separator()
@@ -119,8 +90,8 @@ class LINKFORGE_PT_export_panel(Panel):
 
             wm = context.window_manager
             validation = None
-            if hasattr(wm, "linkforge_validation"):
-                validation = typing.cast(typing.Any, wm).linkforge_validation
+            if wm and hasattr(wm, "linkforge_validation"):
+                validation = getattr(wm, "linkforge_validation")
 
             if not validation or not validation.has_results:
                 box.label(text="Not run yet", icon="INFO")
@@ -253,7 +224,9 @@ class LINKFORGE_PT_export_panel(Panel):
             )
 
             if props.show_kinematic_tree:
-                self.draw_component_browser(layout, scene, links_dict, num_links, num_dof=total_dof)
+                self.draw_component_browser(
+                    layout, scene, links_dict, num_links, _num_dof=total_dof, stats=stats
+                )
 
     def draw_component_browser(
         self,
@@ -261,14 +234,15 @@ class LINKFORGE_PT_export_panel(Panel):
         scene: Scene,
         links_dict: dict[str, typing.Any],
         num_links: int,
-        num_dof: int,
+        _num_dof: int,
+        stats: typing.Any,
     ) -> None:
         """Draw the component browser section with search filtering."""
         select_box = layout.box()
         if not select_box:
             return
 
-        props = typing.cast(typing.Any, scene).linkforge
+        props = getattr(scene, "linkforge")
 
         # UI
         search_row = select_box.row(align=True)
@@ -303,13 +277,7 @@ class LINKFORGE_PT_export_panel(Panel):
                 op.object_type = "link"
 
         # Joints list
-        joints = [
-            obj
-            for obj in scene.objects
-            if obj.type == "EMPTY"
-            and hasattr(obj, "linkforge_joint")
-            and typing.cast(typing.Any, obj).linkforge_joint.is_robot_joint
-        ]
+        joints = stats.joint_objects
 
         filtered_joints = filter_items_by_name(joints, search_term)
 
@@ -334,13 +302,7 @@ class LINKFORGE_PT_export_panel(Panel):
                 op.object_type = "joint"
 
         # Sensors list
-        sensors = [
-            obj
-            for obj in scene.objects
-            if obj.type == "EMPTY"
-            and hasattr(obj, "linkforge_sensor")
-            and typing.cast(typing.Any, obj).linkforge_sensor.is_robot_sensor
-        ]
+        sensors = stats.sensor_objects
 
         filtered_sensors = filter_items_by_name(sensors, search_term)
 

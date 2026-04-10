@@ -1,0 +1,64 @@
+<?xml version="1.0"?>
+<robot name="simple_endeffector" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:arg name="finger_length" default="0.10"/>
+  <xacro:arg name="include_tip_pad" default="true"/>
+
+  <xacro:property name="finger_width" value="0.02"/>
+  <xacro:property name="finger_height" value="0.02"/>
+  <xacro:property name="resolved_finger_length" value="$(arg finger_length)"/>
+
+  <link name="endeffector_base">
+    <visual>
+      <geometry>
+        <box size="0.12 0.06 0.04"/>
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.12 0.06 0.04"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="finger_link">
+    <visual>
+      <geometry>
+        <box size="${resolved_finger_length} ${finger_width} ${finger_height}"/>
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="${resolved_finger_length} ${finger_width} ${finger_height}"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="finger_joint" type="revolute">
+    <parent link="endeffector_base"/>
+    <child link="finger_link"/>
+    <origin xyz="${resolved_finger_length / 2} 0.0 0.0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-0.5" upper="0.5" effort="5.0" velocity="1.0"/>
+  </joint>
+
+  <xacro:if value="$(arg include_tip_pad)">
+    <link name="finger_pad">
+      <visual>
+        <geometry>
+          <box size="0.02 0.03 0.03"/>
+        </geometry>
+      </visual>
+      <collision>
+        <geometry>
+          <box size="0.02 0.03 0.03"/>
+        </geometry>
+      </collision>
+    </link>
+
+    <joint name="finger_pad_joint" type="fixed">
+      <parent link="finger_link"/>
+      <child link="finger_pad"/>
+      <origin xyz="${resolved_finger_length / 2} 0.0 0.0" rpy="0 0 0"/>
+    </joint>
+  </xacro:if>
+</robot>

@@ -65,7 +65,7 @@ from linkforge_core.composer.robot_assembly import RobotAssembly
 from linkforge_core.models import Robot
 from linkforge_core.models.geometry import Box, Vector3
 
-assembly = RobotAssembly("my_robot", Robot(name="my_robot"))
+assembly = RobotAssembly(urdf=Robot(name="my_robot"))
 
 # with_mass() on a box geometry will compute the full inertia tensor
 # using the same solid-body dynamics formulas used in Blender.

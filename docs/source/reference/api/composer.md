@@ -56,7 +56,7 @@ base_arm = XACROParser().parse(Path("ur10e.urdf.xacro"))
 gripper  = XACROParser().parse(Path("robotiq_2f140.urdf.xacro"))
 
 # Build assembly
-assembly = RobotAssembly("dual_arm_cell", base_arm)
+assembly = RobotAssembly(urdf=base_arm)
 assembly.attach(gripper, at_link="tool0", joint_name="gripper_mount", prefix="left_")
 ```
 
@@ -70,7 +70,7 @@ from linkforge_core.models.geometry import Vector3
 from linkforge_core.models.joint import JointLimits
 from linkforge_core.models import Robot
 
-assembly = RobotAssembly("my_robot", Robot(name="my_robot"))
+assembly = RobotAssembly(urdf=Robot(name="my_robot"))
 
 # Fixed bracket
 assembly.add_link("bracket") \

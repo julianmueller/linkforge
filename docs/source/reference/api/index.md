@@ -55,7 +55,7 @@ from linkforge_core.models import Robot
 from linkforge_core.models.geometry import Vector3
 from linkforge_core.models.joint import JointLimits
 
-assembly = RobotAssembly("my_robot", Robot(name="my_robot"))
+assembly = RobotAssembly(urdf=Robot(name="my_robot"))
 
 assembly.add_link("base_link").with_mass(5.0).connect_to("world", "world_joint").as_fixed()
 assembly.add_link("arm").with_mass(2.0).connect_to("base_link", "shoulder").as_revolute(

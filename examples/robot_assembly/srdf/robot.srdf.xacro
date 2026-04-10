@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<robot name="simple_robot" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:arg name="include_world_joint" default="true"/>
+  <xacro:arg name="include_alignment_pin_joint" default="true"/>
+
+  <xacro:if value="$(arg include_world_joint)">
+    <virtual_joint
+        name="world_joint"
+        type="fixed"
+        parent_frame="world"
+        child_link="base_link"/>
+  </xacro:if>
+
+  <passive_joint name="tool_mount_joint"/>
+
+  <xacro:if value="$(arg include_alignment_pin_joint)">
+    <passive_joint name="alignment_pin_joint"/>
+  </xacro:if>
+</robot>

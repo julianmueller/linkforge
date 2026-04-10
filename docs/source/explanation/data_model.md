@@ -77,7 +77,7 @@ from linkforge_core.composer.robot_assembly import RobotAssembly
 
 # Both patterns produce the same output: a validated Robot + SRDF ready for
 # export to URDF, SRDF, or any future format (MJCF, SDF).
-assembly = RobotAssembly("my_robot", ...)
+assembly = RobotAssembly(urdf=...)
 urdf_str = assembly.export_urdf()
 srdf_str = assembly.export_srdf()
 ```

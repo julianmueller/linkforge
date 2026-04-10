@@ -23,7 +23,6 @@ try:
 except ImportError:
     yaml = None
 
-from ..base import RobotParser
 from ..exceptions import (
     RobotParserError,
     RobotXacroError,
@@ -31,7 +30,6 @@ from ..exceptions import (
     RobotXacroRecursionError,
 )
 from ..logging_config import get_logger
-from ..models.robot import Robot
 from ..utils.dict_utils import AttrDict
 from ..utils.path_utils import resolve_package_path
 
@@ -83,6 +81,19 @@ class XacroTemplate:
     root_attrib: dict[str, str]
     container: ET.Element  # Container of pre-resolved elements
     macros: dict[str, tuple[list[str], ET.Element]]
+
+
+@dataclass(frozen=True)
+class ResolvedXacro:
+    """Resolved XML plus source context for downstream format parsers."""
+
+    xml: str
+    base_directory: Path | None = None
+    source_path: Path | None = None
+
+    def __str__(self) -> str:
+        """Return the resolved XML payload."""
+        return self.xml
 
 
 # Global cache for structural templates to speed up repeated assembly of identical robots.
@@ -1024,36 +1035,77 @@ class XacroResolver:
         return None
 
 
-class XACROParser(RobotParser):
-    """Refined XACRO Parser using a class-based interface."""
+class XACROParser:
+    """Resolve XACRO files or strings into plain XML plus source context."""
 
-    def parse(self, filepath: Path, **kwargs: Any) -> Robot:
-        """Parse XACRO file into a Robot model.
+    @staticmethod
+    def _create_resolver(
+        *,
+        search_paths: list[Path] | None = None,
+        start_dir: Path | None = None,
+        extra_args: dict[str, Any] | None = None,
+    ) -> XacroResolver:
+        """Build a configured XacroResolver instance."""
+        resolver = XacroResolver(search_paths=search_paths, start_dir=start_dir)
+
+        # Forward caller-supplied args to the resolver, skipping None values
+        # so we do not override xacro defaults like default="".
+        for key, value in (extra_args or {}).items():
+            if value is not None:
+                resolver.args[key] = resolver._try_parse_typed_value(str(value))
+
+        return resolver
+
+    def parse(self, filepath: Path, **kwargs: Any) -> ResolvedXacro:
+        """Resolve a XACRO file into plain XML.
 
         Args:
-            filepath: Path to the input file
-            **kwargs: Additional parsing options
-                search_paths: List of additional paths to search for includes
-                start_dir: Base directory for package:// resolution (defaults to filepath.parent)
+            filepath: Path to the input XACRO file.
+            **kwargs: XACRO arguments plus optional `search_paths`, `start_dir`,
+                or `base_directory` overrides.
 
         Returns:
-            The generic Robot model (Intermediate Representation)
+            A resolved XML payload that can be passed into `URDFParser` or `SRDFParser`.
         """
-        from .urdf_parser import URDFParser
-
-        resolver = XacroResolver(
+        internal_keys = {"search_paths", "start_dir", "base_directory"}
+        start_dir = kwargs.get("start_dir", kwargs.get("base_directory", filepath.parent))
+        resolver = self._create_resolver(
             search_paths=kwargs.get("search_paths"),
-            start_dir=kwargs.get("start_dir", filepath.parent),
+            start_dir=start_dir,
+            extra_args={k: v for k, v in kwargs.items() if k not in internal_keys},
         )
 
-        # Forward caller-supplied args to the resolver, skipping internal keys
-        # and None values (str(None) would override xacro defaults like default="").
-        for k, v in kwargs.items():
-            if k not in ["search_paths", "start_dir"] and v is not None:
-                resolver.args[k] = resolver._try_parse_typed_value(str(v))
+        return ResolvedXacro(
+            xml=resolver.resolve_file(filepath),
+            base_directory=filepath.parent,
+            source_path=filepath,
+        )
 
-        urdf_string = resolver.resolve_file(filepath)
+    def parse_string(
+        self,
+        xml_string: str,
+        base_directory: Path | None = None,
+        **kwargs: Any,
+    ) -> ResolvedXacro:
+        """Resolve a XACRO string into plain XML.
 
-        return URDFParser().parse_string(
-            urdf_string, urdf_directory=filepath.parent, default_name=filepath.stem, **kwargs
+        Args:
+            xml_string: XACRO XML content.
+            base_directory: Optional base directory for resolving relative includes.
+            **kwargs: XACRO arguments plus optional `search_paths` or `start_dir`.
+
+        Returns:
+            A resolved XML payload that can be passed into `URDFParser` or `SRDFParser`.
+        """
+        internal_keys = {"search_paths", "start_dir", "base_directory"}
+        start_dir = kwargs.get("start_dir", kwargs.get("base_directory", base_directory))
+        resolver = self._create_resolver(
+            search_paths=kwargs.get("search_paths"),
+            start_dir=start_dir,
+            extra_args={k: v for k, v in kwargs.items() if k not in internal_keys},
+        )
+
+        return ResolvedXacro(
+            xml=resolver.resolve_string(xml_string),
+            base_directory=base_directory,
         )

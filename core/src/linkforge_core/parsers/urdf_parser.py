@@ -1,13 +1,13 @@
 """URDF XML parser to import robot models.
 
-This module implements a robust URDF/XACRO parser that transforms XML robot
+This module implements a robust URDF parser that transforms XML robot
 descriptions into the internal LinkForge `Robot` model. It is designed for
 high-fidelity round-tripping and includes:
 
 - **Comprehensive Parsing**: Full support for all URDF joint types, multiple
   visual/collision elements, and complex nested structures.
-- **Native XACRO Support**: Integrated resolution of XACRO macros, properties,
-  and includes using the built-in `XACROParser`.
+- **XACRO-Aware Entry Points**: Clear separation between XACRO resolution and
+  URDF parsing, with dedicated helpers for resolved XACRO input.
 - **Security & Validation**: Built-in protection against XML attacks (depth
   limits) and strict validation of mesh paths and numeric values.
 - **Error Resilience**: Informative error messages and fallback mechanisms
@@ -76,6 +76,7 @@ from ..utils.xml_utils import (
     parse_optional_float,
     parse_vector3,
 )
+from .xacro_parser import ResolvedXacro, XACROParser
 from .xml_base import MAX_FILE_SIZE, RobotXMLParser
 
 logger = get_logger(__name__)
@@ -783,14 +784,14 @@ class URDFParser(RobotXMLParser):
 
         return robot
 
-    def parse(self, filepath: Path, **_kwargs: Any) -> Robot:
-        """Parse URDF file into a Robot model using iterative parsing.
+    def parse(self, source: Path | str | ResolvedXacro, **_kwargs: Any) -> Robot:
+        """Parse URDF content into a Robot model.
 
         This implementation uses iterparse to maintain O(1) memory complexity
         even for massive URDF files.
 
         Args:
-            filepath: Path to the input file
+            source: URDF file path, URDF XML string, or resolved XACRO payload.
             **kwargs: Additional parsing options
 
         Returns:
@@ -802,6 +803,13 @@ class URDFParser(RobotXMLParser):
             RobotParserXMLRootError: If root tag is not <robot>
             RobotParserUnexpectedError: If XML is malformed or internal error occurs
         """
+        if isinstance(source, ResolvedXacro):
+            return self.parse_string(source.xml, urdf_directory=source.base_directory)
+
+        if isinstance(source, str):
+            return self.parse_string(source)
+
+        filepath = source
         if not filepath.exists():
             raise RobotParserIOError(filepath=filepath, reason="File not found")
 
@@ -843,6 +851,11 @@ class URDFParser(RobotXMLParser):
             raise RobotParserUnexpectedError(
                 source_area="Unexpected URDF parse", original_error=e
             ) from e
+
+    def parse_xacro(self, filepath: Path, **kwargs: Any) -> Robot:
+        """Resolve a XACRO file and parse the resulting URDF."""
+        resolved = XACROParser().parse(filepath, **kwargs)
+        return self.parse(resolved)
 
     def parse_string(
         self,

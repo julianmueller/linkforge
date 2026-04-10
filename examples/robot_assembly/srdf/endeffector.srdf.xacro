@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<robot name="simple_endeffector" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:arg name="include_tip_pad" default="true"/>
+
+  <passive_joint name="finger_joint"/>
+  <disable_collisions
+      link1="endeffector_base"
+      link2="finger_link"
+      reason="Adjacent"/>
+
+  <xacro:if value="$(arg include_tip_pad)">
+    <disable_collisions
+        link1="finger_link"
+        link2="finger_pad"
+        reason="Attached"/>
+  </xacro:if>
+</robot>

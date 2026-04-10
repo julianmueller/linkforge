@@ -6,8 +6,6 @@ This module implements the 'Composer' which allows for both macro-assembly
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-
 from ..exceptions import RobotValidationError, ValidationErrorCode
 from ..generators.srdf_generator import SRDFGenerator
 from ..generators.urdf_generator import URDFGenerator
@@ -22,24 +20,35 @@ from ..models.srdf import (
 )
 
 
-@dataclass
 class RobotAssembly:
-    """A high-level API to compose robots from multiple components.
+    """A high-level API to compose robots from URDF and SRDF components."""
 
-    Attributes:
-        robot: The underlying robot model being composed.
-        srdf: The semantic robot description (SRDF) for MoveIt support.
-    """
+    def __init__(
+        self,
+        *,
+        urdf: Robot,
+        srdf: SemanticRobotDescription | None = None,
+    ) -> None:
+        """Initialize an assembly from separate URDF and SRDF inputs.
 
-    robot: Robot
-    srdf: SemanticRobotDescription = field(default_factory=SemanticRobotDescription)
+        Args:
+            urdf: The kinematic robot model to compose.
+            srdf: Optional semantic description to pair with the robot.
+        """
+        self._urdf = urdf
+        self.srdf = srdf or urdf.semantic or SemanticRobotDescription()
+        self._urdf.semantic = self.srdf
 
-    def __post_init__(self) -> None:
-        """Sync the root robot's semantic description if it exists."""
-        if self.robot.semantic:
-            self.srdf = self.robot.semantic
-        else:
-            self.robot.semantic = self.srdf
+    @property
+    def urdf(self) -> Robot:
+        """Return the assembly's URDF robot model."""
+        return self._urdf
+
+    @urdf.setter
+    def urdf(self, value: Robot) -> None:
+        """Replace the assembly's URDF robot model and keep SRDF synced."""
+        self._urdf = value
+        self._urdf.semantic = self.srdf
 
     @classmethod
     def create(cls, name: str) -> RobotAssembly:
@@ -51,7 +60,7 @@ class RobotAssembly:
         Returns:
             A new RobotAssembly instance.
         """
-        return cls(robot=Robot(name=name))
+        return cls(urdf=Robot(name=name))
 
     def _add_link_with_joint(
         self,
@@ -74,7 +83,7 @@ class RobotAssembly:
             axis: Optional joint axis.
             limits: Optional joint limits.
         """
-        self.robot.add_link(link)
+        self.urdf.add_link(link)
         joint = Joint(
             name=joint_name,
             type=joint_type,
@@ -84,11 +93,11 @@ class RobotAssembly:
             axis=axis,
             limits=limits,
         )
-        self.robot.add_joint(joint)
+        self.urdf.add_joint(joint)
 
     def attach(
         self,
-        component: Robot,
+        component: Robot | RobotAssembly,
         at_link: str,
         joint_name: str,
         prefix: str = "",
@@ -97,10 +106,10 @@ class RobotAssembly:
         axis: Vector3 | None = None,
         limits: JointLimits | None = None,
     ) -> RobotAssembly:
-        """Attach a sub-robot component to the current assembly.
+        """Attach a sub-robot component or sub-assembly to the current assembly.
 
         Args:
-            component: The robot model to attach.
+            component: The robot model or assembly to attach.
             at_link: The link in the current assembly to attach to.
             joint_name: Name of the joint connecting the assembly to the component.
             prefix: Optional prefix to add to all elements in the component.
@@ -113,7 +122,7 @@ class RobotAssembly:
             The assembly instance for chaining.
         """
         # 0. Early validation of attachment point
-        if not self.robot.get_link(at_link):
+        if not self.urdf.get_link(at_link):
             raise RobotValidationError(
                 ValidationErrorCode.NOT_FOUND,
                 f"Attachment link '{at_link}' not found in assembly",
@@ -122,7 +131,8 @@ class RobotAssembly:
             )
 
         # 1. Deep copy the component to ensure isolation
-        sub_robot = component.clone()
+        component_robot = component.urdf if isinstance(component, RobotAssembly) else component
+        sub_robot = component_robot.clone()
 
         # 2. Apply prefix if provided
         if prefix:
@@ -134,18 +144,18 @@ class RobotAssembly:
         if not root_link:
             raise RobotValidationError(
                 ValidationErrorCode.NO_ROOT,
-                f"No root link found in component '{component.name}'",
+                f"No root link found in component '{component_robot.name}'",
                 target="Attach",
-                value=component.name,
+                value=component_robot.name,
             )
 
         # 4. Merge links
         for link in sub_robot.links:
-            self.robot.add_link(link)
+            self.urdf.add_link(link)
 
         # 5. Merge joints
         for joint in sub_robot.joints:
-            self.robot.add_joint(joint)
+            self.urdf.add_joint(joint)
 
         # 6. Create the connecting joint
         connection = Joint(
@@ -157,32 +167,30 @@ class RobotAssembly:
             axis=axis,
             limits=limits,
         )
-        self.robot.add_joint(connection)
+        self.urdf.add_joint(connection)
 
         # 7. Merge additional elements (sensors, transmissions, etc.)
         for sensor in sub_robot.sensors:
-            self.robot.add_sensor(sensor)
+            self.urdf.add_sensor(sensor)
 
         for trans in sub_robot.transmissions:
-            self.robot.add_transmission(trans)
+            self.urdf.add_transmission(trans)
 
         for rc in sub_robot.ros2_controls:
-            self.robot.add_ros2_control(rc)
+            self.urdf.add_ros2_control(rc)
 
         for gz in sub_robot.gazebo_elements:
-            self.robot.add_gazebo_element(gz)
+            self.urdf.add_gazebo_element(gz)
 
         # 8. Merge materials
-        self.robot.materials.update(sub_robot.materials)
+        self.urdf.materials.update(sub_robot.materials)
 
         # 9. Merge semantic data (SRDF)
         if sub_robot.semantic:
             self._merge_srdf(sub_robot.semantic)
 
         # 10. Validate kinematic integrity
-        _ = (
-            self.robot.graph
-        )  # Accessing the property triggers validation of connectivity and cycles
+        _ = self.urdf.graph  # Accessing the property triggers validation of connectivity and cycles
 
         return self
 
@@ -273,7 +281,7 @@ class RobotAssembly:
             URDF XML string.
         """
         generator = URDFGenerator(pretty_print=pretty_print)
-        return generator.generate(self.robot, validate=validate)
+        return generator.generate(self.urdf, validate=validate)
 
     def export_srdf(self, validate: bool = True, pretty_print: bool = True) -> str:
         """Export the assembled semantic description to SRDF XML.
@@ -286,7 +294,7 @@ class RobotAssembly:
             SRDF XML string.
         """
         generator = SRDFGenerator(pretty_print=pretty_print)
-        return generator.generate(self.robot, validate=validate)
+        return generator.generate(self.urdf, validate=validate)
 
 
 class LinkBuilder:

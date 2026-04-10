@@ -1,14 +1,14 @@
 """SRDF XML parser for LinkForge.
 
 This module implements a robust SRDF (Semantic Robot Description Format) parser
-that supports MoveIt-style tags and native XACRO resolution.
+that supports MoveIt-style tags with optional XACRO preprocessing helpers.
 """
 
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, overload, runtime_checkable
 
 from ..base import IResourceResolver
 from ..exceptions import (
@@ -16,6 +16,7 @@ from ..exceptions import (
     RobotParserIOError,
     RobotParserUnexpectedError,
     RobotParserXMLRootError,
+    XacroDetectedError,
 )
 from ..logging_config import get_logger
 from ..models import Robot
@@ -29,10 +30,11 @@ from ..models.srdf import (
     VirtualJoint,
 )
 from ..utils.xml_utils import parse_float
-from .xacro_parser import XacroResolver
+from .xacro_parser import ResolvedXacro, XACROParser
 from .xml_base import MAX_FILE_SIZE, RobotXMLParser
 
 logger = get_logger(__name__)
+_SRDF_XACRO_DETECTED = "SRDF String contains XACRO"
 
 
 @runtime_checkable
@@ -45,7 +47,7 @@ class ITemplateResolver(Protocol):
 
 
 class SRDFParser(RobotXMLParser):
-    """Refined SRDF Parser with XACRO and MoveIt support."""
+    """Refined SRDF parser with MoveIt support and explicit XACRO helpers."""
 
     def __init__(
         self,
@@ -121,20 +123,41 @@ class SRDFParser(RobotXMLParser):
 
         return GroupState(name=name, group=group, joint_values=joint_values)
 
+    @overload
+    def parse_string(
+        self,
+        xml_string: str,
+        robot: None = None,
+        base_directory: Path | None = None,
+        **kwargs: Any,
+    ) -> SemanticRobotDescription: ...
+
+    @overload
+    def parse_string(
+        self,
+        xml_string: str,
+        robot: Robot,
+        base_directory: Path | None = None,
+        **kwargs: Any,
+    ) -> Robot: ...
+
     def parse_string(
         self,
         xml_string: str,
         robot: Robot | None = None,
         base_directory: Path | None = None,
         **kwargs: Any,
-    ) -> Robot:
-        """Parse SRDF from string and update or create a Robot model."""
-        # Handle templating resolution
+    ) -> SemanticRobotDescription | Robot:
+        """Parse SRDF from string.
+
+        When `robot` is provided, the parsed semantic description is attached
+        to that robot and the robot is returned. Otherwise the standalone
+        `SemanticRobotDescription` is returned.
+        """
         if self.template_resolver is not None:
             xml_string = self.template_resolver.resolve_string(xml_string)
         elif self._detect_xacro(xml_string):
-            resolver = XacroResolver(search_paths=self.search_paths, start_dir=base_directory)
-            xml_string = resolver.resolve_string(xml_string)
+            raise XacroDetectedError(_SRDF_XACRO_DETECTED)
 
         try:
             root = ET.fromstring(xml_string)
@@ -148,19 +171,22 @@ class SRDFParser(RobotXMLParser):
         if root.tag != "robot":
             raise RobotParserXMLRootError(root.tag)
 
-        robot_name = root.get("name", "unnamed_robot")
+        semantic = self._parse_elements(root)
+
         if robot is None:
-            robot = Robot(name=robot_name)
+            return semantic
 
-        self._parse_elements(root, robot)
+        robot.semantic = semantic
 
-        # Handle kwargs if any (e.g. for future extensions)
-        if kwargs:
-            logger.debug(f"SRDFParser received unused options: {list(kwargs.keys())}")
+        unused_options = list(kwargs.keys())
+        if base_directory is not None:
+            unused_options.append("base_directory")
+        if unused_options:
+            logger.debug(f"SRDFParser received unused options: {unused_options}")
 
         return robot
 
-    def _parse_elements(self, root: ET.Element, robot: Robot) -> None:
+    def _parse_elements(self, root: ET.Element) -> SemanticRobotDescription:
         """Internal helper to parse all SRDF elements from root."""
         virtual_joints: list[VirtualJoint] = []
         groups: list[PlanningGroup] = []
@@ -183,7 +209,7 @@ class SRDFParser(RobotXMLParser):
             elif child.tag == "disable_collisions":
                 disabled_collisions.append(self._parse_disable_collisions_elem(child))
 
-        robot.semantic = SemanticRobotDescription(
+        return SemanticRobotDescription(
             virtual_joints=virtual_joints,
             groups=groups,
             group_states=group_states,
@@ -218,8 +244,36 @@ class SRDFParser(RobotXMLParser):
             reason=elem.get("reason"),
         )
 
-    def parse(self, filepath: Path, robot: Robot | None = None, **kwargs: Any) -> Robot:
-        """Parse SRDF from file."""
+    @overload
+    def parse(
+        self,
+        source: Path | str | ResolvedXacro,
+        robot: None = None,
+        **kwargs: Any,
+    ) -> SemanticRobotDescription: ...
+
+    @overload
+    def parse(
+        self,
+        source: Path | str | ResolvedXacro,
+        robot: Robot,
+        **kwargs: Any,
+    ) -> Robot: ...
+
+    def parse(
+        self,
+        source: Path | str | ResolvedXacro,
+        robot: Robot | None = None,
+        **kwargs: Any,
+    ) -> SemanticRobotDescription | Robot:
+        """Parse SRDF content from a file path, string, or resolved XACRO payload."""
+        if isinstance(source, ResolvedXacro):
+            return self.parse_string(source.xml, robot=robot, base_directory=source.base_directory)
+
+        if isinstance(source, str):
+            return self.parse_string(source, robot=robot)
+
+        filepath = source
         if not filepath.exists():
             raise RobotParserIOError(filepath=filepath, reason="Missing file")
 
@@ -229,15 +283,9 @@ class SRDFParser(RobotXMLParser):
             raise RobotParserIOError(filepath=filepath, reason="File too large")
 
         try:
-            # If it's a XACRO file, resolve it using XacroResolver
             if filepath.suffix == ".xacro" or filepath.name.endswith(".srdf.xacro"):
-                resolver = XacroResolver(search_paths=self.search_paths, start_dir=filepath.parent)
-                resolved_content = resolver.resolve_file(filepath)
-                return self.parse_string(
-                    resolved_content, robot=robot, base_directory=filepath.parent, **kwargs
-                )
+                raise XacroDetectedError(filepath.name)
 
-            # For standard SRDF, read and call parse_string
             content = filepath.read_text(encoding="utf-8")
             return self.parse_string(content, robot=robot, base_directory=filepath.parent, **kwargs)
 
@@ -245,3 +293,22 @@ class SRDFParser(RobotXMLParser):
             if isinstance(e, RobotParserError):
                 raise
             raise RobotParserIOError(filepath=filepath, reason=str(e)) from e
+
+    @overload
+    def parse_xacro(
+        self, filepath: Path, robot: None = None, **kwargs: Any
+    ) -> SemanticRobotDescription: ...
+
+    @overload
+    def parse_xacro(self, filepath: Path, robot: Robot, **kwargs: Any) -> Robot: ...
+
+    def parse_xacro(
+        self,
+        filepath: Path,
+        robot: Robot | None = None,
+        **kwargs: Any,
+    ) -> SemanticRobotDescription | Robot:
+        """Resolve a XACRO file and parse the resulting SRDF."""
+        xacro_kwargs = {"search_paths": self.search_paths, **kwargs}
+        resolved = XACROParser().parse(filepath, **xacro_kwargs)
+        return self.parse(resolved, robot=robot)

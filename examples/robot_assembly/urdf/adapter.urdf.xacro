@@ -1,0 +1,84 @@
+<?xml version="1.0"?>
+<robot name="simple_adapter" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:arg name="flange_offset" default="0.08"/>
+  <xacro:arg name="include_support_block" default="true"/>
+
+  <xacro:property name="adapter_base_xy" value="0.10"/>
+  <xacro:property name="adapter_base_z" value="0.04"/>
+  <xacro:property name="adapter_flange_xy" value="0.06"/>
+  <xacro:property name="adapter_flange_z" value="0.03"/>
+
+  <link name="adapter_base">
+    <visual>
+      <geometry>
+        <box size="${adapter_base_xy} ${adapter_base_xy} ${adapter_base_z}"/>
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="${adapter_base_xy} ${adapter_base_xy} ${adapter_base_z}"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="adapter_flange">
+    <visual>
+      <geometry>
+        <box size="${adapter_flange_xy} ${adapter_flange_xy} ${adapter_flange_z}"/>
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="${adapter_flange_xy} ${adapter_flange_xy} ${adapter_flange_z}"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="adapter_body_joint" type="fixed">
+    <parent link="adapter_base"/>
+    <child link="adapter_flange"/>
+    <origin xyz="$(arg flange_offset) 0.0 0.0" rpy="0 0 0"/>
+  </joint>
+
+  <xacro:if value="$(arg include_support_block)">
+    <link name="support_block">
+      <visual>
+        <geometry>
+          <box size="0.03 0.03 0.06"/>
+        </geometry>
+      </visual>
+      <collision>
+        <geometry>
+          <box size="0.03 0.03 0.06"/>
+        </geometry>
+      </collision>
+    </link>
+
+    <joint name="adapter_support_joint" type="fixed">
+      <parent link="adapter_base"/>
+      <child link="support_block"/>
+      <origin xyz="0.0 0.0 0.05" rpy="0 0 0"/>
+    </joint>
+  </xacro:if>
+
+  <xacro:unless value="$(arg include_support_block)">
+    <link name="compact_cap">
+      <visual>
+        <geometry>
+          <box size="0.03 0.03 0.01"/>
+        </geometry>
+      </visual>
+      <collision>
+        <geometry>
+          <box size="0.03 0.03 0.01"/>
+        </geometry>
+      </collision>
+    </link>
+
+    <joint name="adapter_cap_joint" type="fixed">
+      <parent link="adapter_base"/>
+      <child link="compact_cap"/>
+      <origin xyz="0.0 0.0 0.03" rpy="0 0 0"/>
+    </joint>
+  </xacro:unless>
+</robot>

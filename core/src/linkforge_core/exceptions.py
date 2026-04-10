@@ -193,9 +193,10 @@ class RobotXacroExpressionError(RobotXacroError):
 
 
 class XacroDetectedError(RobotParserError):
-    """Raised when XACRO content is detected in a URDF parser."""
+    """Raised when unresolved XACRO content is passed to a format parser."""
 
     def __init__(self, message: str = "XACRO detected"):
         super().__init__(
-            f"XACRO file detected: {message}. Please convert to URDF or use XACROParser."
+            f"XACRO file detected: {message}. Please resolve it with XACROParser "
+            "or use the parser's parse_xacro() helper."
         )
